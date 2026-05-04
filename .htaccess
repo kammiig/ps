@@ -1,0 +1,15 @@
+Options -Indexes
+DirectoryIndex index.php
+
+<FilesMatch "^(\.env|composer\.(json|lock)|README\.md)$">
+    Require all denied
+</FilesMatch>
+
+RedirectMatch 403 ^/(app|database|storage)(/.*)?$
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^ index.php [L]
+</IfModule>
