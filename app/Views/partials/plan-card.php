@@ -25,5 +25,5 @@ $orderUrl = $plan['whmcs_url'] ?: $whmcs->cartUrl();
         <li><?= icon('check') ?> Free Cloudflare CDN</li>
         <?php foreach ($features as $feature): ?><li><?= icon('check') ?> <?= e($feature) ?></li><?php endforeach; ?>
     </ul>
-    <a class="btn <?= !empty($plan['is_highlighted']) ? 'btn-primary' : 'btn-outline' ?>" href="<?= e($orderUrl) ?>"><?= e($plan['button_text'] ?: 'Order Now') ?> <?= icon('arrow') ?></a>
+    <a class="btn <?= !empty($plan['is_highlighted']) ? 'btn-primary' : 'btn-outline' ?> plan-button" href="<?= e($orderUrl) ?>"><?= e($plan['button_text'] ?: 'Order Now') ?> <?= icon('arrow') ?></a>
 </article>

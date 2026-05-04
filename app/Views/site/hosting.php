@@ -1,12 +1,27 @@
 <section class="page-hero">
-    <div class="container narrow">
-        <span class="section-kicker">Hosting plans</span>
-        <h1>Hosting Plans Built for Business Websites, WordPress and Resellers</h1>
-        <p>Choose a cPanel, WordPress or reseller hosting plan and continue to checkout through your connected WHMCS billing flow.</p>
+    <div class="container page-hero-grid">
+        <div>
+            <span class="section-kicker">Hosting plans</span>
+            <h1>Hosting Plans Built for Business Websites, WordPress and Resellers</h1>
+            <p>Choose a cPanel, WordPress or reseller hosting plan and continue to checkout through your connected WHMCS billing flow.</p>
+            <div class="actions">
+                <a class="btn btn-primary" href="#plans">Compare Plans <?= icon('arrow') ?></a>
+                <a class="btn btn-outline" href="<?= e($whmcs->clientAreaUrl()) ?>">Client Login</a>
+            </div>
+        </div>
+        <aside class="page-hero-card">
+            <span class="mini-label">Included essentials</span>
+            <ul class="feature-list">
+                <li><?= icon('check') ?> Free SSL</li>
+                <li><?= icon('check') ?> cPanel access</li>
+                <li><?= icon('check') ?> WordPress installer</li>
+                <li><?= icon('check') ?> Cloudflare CDN support</li>
+            </ul>
+        </aside>
     </div>
 </section>
 
-<section class="section">
+<section class="section" id="plans">
     <div class="container">
         <div class="pricing-grid">
             <?php foreach ($plans as $plan): ?>

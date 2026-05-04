@@ -1,8 +1,15 @@
 <article class="page-hero">
-    <div class="container narrow">
-        <span class="section-kicker"><?= e($post['category_name'] ?? 'Blog') ?></span>
-        <h1><?= e($post['title']) ?></h1>
-        <?php if (!empty($post['published_at'])): ?><p>Published <?= e(date('j F Y', strtotime($post['published_at']))) ?></p><?php endif; ?>
+    <div class="container page-hero-grid">
+        <div>
+            <span class="section-kicker"><?= e($post['category_name'] ?? 'Blog') ?></span>
+            <h1><?= e($post['title']) ?></h1>
+            <?php if (!empty($post['published_at'])): ?><p>Published <?= e(date('j F Y', strtotime($post['published_at']))) ?></p><?php endif; ?>
+        </div>
+        <aside class="page-hero-card">
+            <span class="mini-label">Planetic guide</span>
+            <strong>Hosting knowledge base</strong>
+            <p>Practical advice for domains, hosting, WordPress and business websites.</p>
+        </aside>
     </div>
 </article>
 

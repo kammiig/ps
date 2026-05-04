@@ -8,10 +8,10 @@ $logo = upload_url($settings['logo_url'] ?? '');
     <div class="container nav-wrap">
         <a class="brand" href="<?= e(url('/')) ?>" aria-label="<?= e($settings['company_name'] ?? 'Planetic Solutions') ?> home">
             <?php if ($logo): ?>
-                <img src="<?= e($logo) ?>" alt="<?= e($settings['company_name'] ?? 'Planetic Solutions') ?> logo" width="160" height="42">
+                <img src="<?= e($logo) ?>" alt="<?= e($settings['company_name'] ?? 'Planetic Solutions') ?> logo" width="168" height="44">
             <?php else: ?>
                 <span class="brand-mark">PS</span>
-                <span class="brand-text"><?= e($settings['company_name'] ?? 'Planetic Solutions') ?></span>
+                <span class="brand-text"><strong>Planetic</strong> Solutions</span>
             <?php endif; ?>
         </a>
         <button class="nav-toggle" type="button" aria-label="Open navigation" aria-expanded="false" data-nav-toggle>
@@ -19,7 +19,14 @@ $logo = upload_url($settings['logo_url'] ?? '');
         </button>
         <nav class="site-nav" aria-label="Main navigation" data-nav>
             <a class="<?= e(is_active('/domains')) ?>" href="<?= e(url('/domains')) ?>">Domains</a>
-            <a class="<?= e(is_active('/hosting')) ?>" href="<?= e(url('/hosting')) ?>">Hosting</a>
+            <div class="nav-group">
+                <a class="<?= e(is_active('/hosting')) ?>" href="<?= e(url('/hosting')) ?>">Hosting</a>
+                <div class="nav-dropdown" aria-label="Hosting links">
+                    <a href="<?= e(url('/hosting')) ?>">All Hosting Plans</a>
+                    <a href="<?= e(url('/wordpress-hosting')) ?>">WordPress Hosting</a>
+                    <a href="<?= e(url('/hosting#reseller-hosting')) ?>">Reseller Hosting</a>
+                </div>
+            </div>
             <a class="<?= e(is_active('/website-development')) ?>" href="<?= e(url('/website-development')) ?>">Website Development</a>
             <a class="<?= e(is_active('/blog')) ?>" href="<?= e(url('/blog')) ?>">Blog</a>
             <a class="<?= e(is_active('/contact')) ?>" href="<?= e(url('/contact')) ?>">Contact</a>

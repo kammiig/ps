@@ -1,8 +1,15 @@
 <section class="page-hero">
-    <div class="container narrow">
-        <span class="section-kicker">Blog</span>
-        <h1>Hosting, Domains and Website Growth Guides</h1>
-        <p>SEO-ready posts you can manage from the admin dashboard with slugs, metadata, categories and featured images.</p>
+    <div class="container page-hero-grid">
+        <div>
+            <span class="section-kicker">Blog</span>
+            <h1>Hosting, Domains and Website Growth Guides</h1>
+            <p>SEO-ready posts you can manage from the admin dashboard with slugs, metadata, categories and featured images.</p>
+        </div>
+        <aside class="page-hero-card">
+            <span class="mini-label">CMS ready</span>
+            <strong>SEO-friendly articles</strong>
+            <p>Publish hosting guides, domain tips and website advice with editable metadata.</p>
+        </aside>
     </div>
 </section>
 

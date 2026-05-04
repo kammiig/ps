@@ -35,20 +35,20 @@ final class SiteController extends Controller
             'faqs' => $faqs,
             'package' => $this->content->package(),
             'services' => $this->rowsFromSetting('home_service_cards', [
-                ['WordPress Hosting', 'Fast WordPress-ready hosting with SSL, cPanel and one-click installs.', 'panel'],
-                ['cPanel Hosting', 'Reliable business hosting with email, databases and simple management.', 'cloud'],
-                ['Reseller Hosting', 'Sell hosting under your own brand with WHMCS-ready order links.', 'globe'],
-                ['Domain Registration', 'Search and register domains through the connected WHMCS client area.', 'shield'],
-                ['Website Development', 'Complete business websites delivered fast with hosting setup included.', 'code'],
-                ['Cloudflare CDN Setup', 'Performance and security tuning with Cloudflare CDN configuration.', 'bolt'],
+                ['WordPress Hosting', 'Fast WordPress-ready hosting with SSL, cPanel and one-click installs.', 'panel', '/wordpress-hosting'],
+                ['cPanel Hosting', 'Reliable business hosting with email, databases and simple management.', 'cloud', '/hosting'],
+                ['Reseller Hosting', 'Sell hosting under your own brand with WHMCS-ready order links.', 'globe', '/hosting#reseller-hosting'],
+                ['Domain Registration', 'Search and register domains through the connected WHMCS client area.', 'shield', '/domains'],
+                ['Website Development', 'Complete business websites delivered fast with hosting setup included.', 'code', '/website-development'],
+                ['Cloudflare CDN Setup', 'Performance and security tuning with Cloudflare CDN configuration.', 'bolt', '/contact'],
             ]),
             'trustBadges' => $this->rowsFromSetting('home_trust_badges', [
-                ['Fast hosting', 'Optimised stack and cache-ready hosting.'],
-                ['Free SSL', 'SSL certificates included on hosting plans.'],
-                ['Free Cloudflare CDN', 'CDN setup support for faster delivery.'],
-                ['cPanel included', 'Familiar control panel for sites, email and files.'],
-                ['WHMCS billing', 'Orders, renewals and invoices handled in WHMCS.'],
-                ['Support focused', 'Business support messaging built into every service.'],
+                ['Free SSL', 'Secure every eligible hosting plan.'],
+                ['cPanel Hosting', 'Familiar website and email control.'],
+                ['WHMCS Billing', 'Orders, renewals and invoices handled.'],
+                ['Cloudflare CDN', 'Performance and security setup support.'],
+                ['48h Website Delivery', 'Fast delivery for the website package.'],
+                ['UK-focused Support', 'Professional support messaging for businesses.'],
             ]),
             'featureSections' => $this->rowsFromSetting('home_feature_sections', [
                 ['Speed & Performance', 'LiteSpeed/cache-ready wording, efficient hosting resources and Cloudflare support help your website feel quick from the first visit.', 'bolt'],
@@ -400,7 +400,7 @@ final class SiteController extends Controller
         foreach (preg_split('/\R/', $raw) ?: [] as $line) {
             $parts = array_map('trim', explode('|', $line));
             if (!empty($parts[0])) {
-                $rows[] = [$parts[0], $parts[1] ?? '', $parts[2] ?? 'check'];
+                $rows[] = [$parts[0], $parts[1] ?? '', $parts[2] ?? 'check', $parts[3] ?? ''];
             }
         }
 

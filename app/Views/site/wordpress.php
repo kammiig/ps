@@ -1,12 +1,19 @@
 <section class="page-hero">
-    <div class="container narrow">
-        <span class="section-kicker">WordPress hosting</span>
-        <h1>Fast WordPress Hosting with SSL, cPanel and Cloudflare CDN</h1>
-        <p>Launch WordPress with one-click installer support, LiteSpeed/cache-ready wording, Elementor-friendly resources and an optional £200 website development add-on.</p>
-        <div class="actions">
-            <a class="btn btn-primary" href="<?= e(url('/hosting')) ?>">View WordPress Plans <?= icon('arrow') ?></a>
-            <a class="btn btn-outline" href="<?= e(url('/website-development')) ?>">Get Website for £200</a>
+    <div class="container page-hero-grid">
+        <div>
+            <span class="section-kicker">WordPress hosting</span>
+            <h1>Fast WordPress Hosting with SSL, cPanel and Cloudflare CDN</h1>
+            <p>Launch WordPress with one-click installer support, LiteSpeed/cache-ready wording, Elementor-friendly resources and an optional £200 website development add-on.</p>
+            <div class="actions">
+                <a class="btn btn-primary" href="<?= e(url('/hosting')) ?>">View WordPress Plans <?= icon('arrow') ?></a>
+                <a class="btn btn-outline" href="<?= e(url('/website-development')) ?>">Get Website for £200</a>
+            </div>
         </div>
+        <aside class="page-hero-card wordpress-card">
+            <span class="mini-label">WordPress ready stack</span>
+            <strong>Installer + SSL + CDN</strong>
+            <p>Designed for business sites, Elementor workflows and clean cPanel management.</p>
+        </aside>
     </div>
 </section>
 

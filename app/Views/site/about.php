@@ -1,8 +1,15 @@
 <section class="page-hero">
-    <div class="container narrow">
-        <span class="section-kicker">About Planetic Solutions</span>
-        <h1><?= e($page['title'] ?? 'Hosting, Domains and Websites with Practical Support') ?></h1>
-        <p>Planetic Solutions helps businesses get online with reliable hosting, domain registration, website development and digital support.</p>
+    <div class="container page-hero-grid">
+        <div>
+            <span class="section-kicker">About Planetic Solutions</span>
+            <h1><?= e($page['title'] ?? 'Hosting, Domains and Websites with Practical Support') ?></h1>
+            <p>Planetic Solutions helps businesses get online with reliable hosting, domain registration, website development and digital support.</p>
+        </div>
+        <aside class="page-hero-card">
+            <span class="mini-label">What we do</span>
+            <strong>Hosting, domains and websites</strong>
+            <p>Practical digital setup for businesses that need a dependable online foundation.</p>
+        </aside>
     </div>
 </section>
 

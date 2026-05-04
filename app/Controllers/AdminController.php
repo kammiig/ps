@@ -152,7 +152,7 @@ final class AdminController extends Controller
 
         return $this->adminRender('admin/form', [
             'title' => 'Homepage Content',
-            'subtitle' => 'Edit hero copy, CTAs, service cards, trust badges and feature sections. Use one item per line with Title | Description | icon.',
+            'subtitle' => 'Edit hero copy, CTAs, service cards, trust badges and feature sections. Service cards can use Title | Description | icon | URL; other rows can use Title | Description | icon.',
             'action' => url('/admin/homepage'),
             'values' => $settings,
             'fields' => [

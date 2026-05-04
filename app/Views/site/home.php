@@ -1,25 +1,36 @@
 <?php
 $heroTitle = $settings['home_hero_title'] ?? 'Fast, Secure & Affordable Web Hosting for Your Business';
-$heroSubtitle = $settings['home_hero_subtitle'] ?? 'Planetic Solutions provides WHMCS-connected reseller hosting, WordPress/cPanel hosting, domain registration and complete business websites delivered with clean setup and support.';
+$heroSubtitle = $settings['home_hero_subtitle'] ?? 'Planetic Solutions provides reliable hosting, domain registration and complete business websites with WHMCS-powered billing, cPanel access and Cloudflare CDN support.';
 $primaryText = $settings['home_primary_cta_text'] ?? 'Search Domain';
 $primaryUrl = $settings['home_primary_cta_url'] ?? '#domain-search';
 $secondaryText = $settings['home_secondary_cta_text'] ?? 'View Hosting Plans';
 $secondaryUrl = $settings['home_secondary_cta_url'] ?? url('/hosting');
 $websiteText = $settings['home_website_cta_text'] ?? 'Get Website for £200';
 $websiteUrl = $settings['home_website_cta_url'] ?? url('/website-development');
-$packageFeatures = json_decode($package['features_json'] ?? '[]', true) ?: [];
 $packageOrderUrl = !empty($package['inquiry_mode']) ? url('/contact') : (($package['cta_url'] ?? '') ?: url('/website-development'));
+$websiteChecklist = [
+    'Professional business website',
+    'Free hosting setup',
+    'Domain registration support',
+    'Elementor/page builder setup where legally licensed',
+    'Envato templates/assets where legally licensed',
+    'Stock images',
+    'Basic content writing',
+    'Basic SEO setup',
+    'Cloudflare CDN',
+    'Delivery in 48 hours',
+];
 ?>
-<section class="hero">
+<section class="hero hero-premium">
     <div class="container hero-grid">
         <div class="hero-copy">
-            <span class="section-kicker">Premium hosting, domains and websites</span>
+            <span class="section-kicker">Premium Hosting, Domains &amp; Websites</span>
             <h1><?= e($heroTitle) ?></h1>
-            <p><?= e($heroSubtitle) ?></p>
+            <p class="hero-lede"><?= e($heroSubtitle) ?></p>
             <div id="domain-search" class="hero-search">
                 <?php require APP_PATH . '/Views/partials/domain-search.php'; ?>
                 <div class="tld-strip">
-                    <?php foreach (array_slice($tlds, 0, 5) as $tld): ?>
+                    <?php foreach (array_slice($tlds, 0, 4) as $tld): ?>
                         <span><?= e($tld['extension']) ?> <strong><?= e($tld['price']) ?></strong></span>
                     <?php endforeach; ?>
                 </div>
@@ -30,15 +41,46 @@ $packageOrderUrl = !empty($package['inquiry_mode']) ? url('/contact') : (($packa
                 <a class="btn btn-light" href="<?= e($websiteUrl) ?>"><?= e($websiteText) ?></a>
             </div>
         </div>
-        <div class="hero-visual" aria-label="Hosting platform overview">
-            <div class="server-stack">
-                <div class="server-row"><span></span><span></span><strong>cPanel</strong></div>
-                <div class="server-row"><span></span><span></span><strong>WHMCS</strong></div>
-                <div class="server-row"><span></span><span></span><strong>SSL</strong></div>
+        <div class="hosting-visual" aria-label="Planetic hosting platform visual">
+            <div class="visual-glow"></div>
+            <div class="visual-window">
+                <div class="visual-topbar">
+                    <span></span><span></span><span></span>
+                    <strong>Planetic Cloud Console</strong>
+                </div>
+                <div class="domain-panel">
+                    <div>
+                        <span class="mini-label">Domain + Hosting</span>
+                        <strong>planeticsolution.com</strong>
+                    </div>
+                    <em>Live</em>
+                </div>
+                <div class="stack-panel">
+                    <div class="stack-item">
+                        <span><?= icon('panel') ?></span>
+                        <div><strong>cPanel</strong><small>Website, email and files</small></div>
+                    </div>
+                    <div class="stack-item">
+                        <span><?= icon('shield') ?></span>
+                        <div><strong>SSL Active</strong><small>HTTPS ready</small></div>
+                    </div>
+                    <div class="stack-item">
+                        <span><?= icon('cloud') ?></span>
+                        <div><strong>Cloudflare CDN</strong><small>Speed and protection</small></div>
+                    </div>
+                    <div class="stack-item">
+                        <span><?= icon('globe') ?></span>
+                        <div><strong>WHMCS Billing</strong><small>Orders and invoices</small></div>
+                    </div>
+                </div>
+                <div class="server-card">
+                    <div class="server-title"><strong>Hosting stack</strong><small>Optimised for business</small></div>
+                    <div class="server-bars"><span></span><span></span><span></span></div>
+                </div>
             </div>
-            <div class="metric-card metric-one"><strong>99.9%</strong><span>Uptime-ready setup</span></div>
-            <div class="metric-card metric-two"><strong>48h</strong><span>Website delivery</span></div>
-            <div class="orbit-card"><?= icon('cloud') ?> Cloudflare CDN</div>
+            <div class="floating-card uptime-card"><strong>99.9%</strong><span>Uptime-ready setup</span></div>
+            <div class="floating-card delivery-card"><strong>48h</strong><span>Website delivery</span></div>
+            <div class="floating-card cdn-card"><?= icon('cloud') ?><span>Cloudflare CDN</span></div>
         </div>
     </div>
 </section>
@@ -47,6 +89,7 @@ $packageOrderUrl = !empty($package['inquiry_mode']) ? url('/contact') : (($packa
     <div class="container trust-grid">
         <?php foreach ($trustBadges as $badge): ?>
             <div>
+                <span class="trust-icon"><?= icon('check') ?></span>
                 <strong><?= e($badge[0]) ?></strong>
                 <span><?= e($badge[1]) ?></span>
             </div>
@@ -65,10 +108,15 @@ $packageOrderUrl = !empty($package['inquiry_mode']) ? url('/contact') : (($packa
         </div>
         <div class="service-grid">
             <?php foreach ($services as $service): ?>
+                <?php
+                $serviceUrl = $service[3] ?: '/hosting';
+                $serviceHref = str_starts_with($serviceUrl, 'http') ? $serviceUrl : url($serviceUrl);
+                ?>
                 <article class="service-card">
                     <div class="icon-pill"><?= icon($service[2] ?? 'check') ?></div>
                     <h3><?= e($service[0]) ?></h3>
                     <p><?= e($service[1]) ?></p>
+                    <a class="card-link" href="<?= e($serviceHref) ?>">Explore service <?= icon('arrow') ?></a>
                 </article>
             <?php endforeach; ?>
         </div>
@@ -92,24 +140,12 @@ $packageOrderUrl = !empty($package['inquiry_mode']) ? url('/contact') : (($packa
     </div>
 </section>
 
-<section class="section feature-band">
-    <div class="container feature-grid">
-        <?php foreach ($featureSections as $feature): ?>
-            <article>
-                <div class="icon-pill"><?= icon($feature[2] ?? 'check') ?></div>
-                <h3><?= e($feature[0]) ?></h3>
-                <p><?= e($feature[1]) ?></p>
-            </article>
-        <?php endforeach; ?>
-    </div>
-</section>
-
 <section class="section website-offer">
     <div class="container split">
         <div>
             <span class="section-kicker">Website development offer</span>
-            <h2><?= e($package['title'] ?? 'Complete Website in Just £200') ?></h2>
-            <p class="lead">Get a complete business website for just £200, including hosting setup, domain registration support, premium design tools where legally licensed, Envato templates/assets where legally licensed, stock images, basic content writing, SEO setup and free Cloudflare CDN. Delivery in just 48 hours.</p>
+            <h2>Complete Business Website in Just £200</h2>
+            <p class="lead">Get a professional business website with hosting setup, domain registration support, premium design tools where legally licensed, Envato templates/assets where legally licensed, stock images, basic SEO setup and Cloudflare CDN. Delivery in just 48 hours.</p>
             <div class="actions">
                 <a class="btn btn-primary" href="<?= e($packageOrderUrl) ?>"><?= e(($package['cta_text'] ?? '') ?: 'Order Website Package') ?> <?= icon('arrow') ?></a>
                 <a class="btn btn-outline" href="<?= e(url('/website-development')) ?>">See what is included</a>
@@ -118,8 +154,28 @@ $packageOrderUrl = !empty($package['inquiry_mode']) ? url('/contact') : (($packa
         <div class="included-panel">
             <h3>Included in the package</h3>
             <ul class="feature-list columns">
-                <?php foreach ($packageFeatures as $feature): ?><li><?= icon('check') ?> <?= e($feature) ?></li><?php endforeach; ?>
+                <?php foreach ($websiteChecklist as $feature): ?><li><?= icon('check') ?> <?= e($feature) ?></li><?php endforeach; ?>
             </ul>
+        </div>
+    </div>
+</section>
+
+<section class="section">
+    <div class="container">
+        <div class="section-head centered">
+            <div>
+                <span class="section-kicker">Why choose us</span>
+                <h2>Premium hosting essentials with a business-first support flow</h2>
+            </div>
+        </div>
+        <div class="feature-grid">
+            <?php foreach ($featureSections as $feature): ?>
+                <article>
+                    <div class="icon-pill"><?= icon($feature[2] ?? 'check') ?></div>
+                    <h3><?= e($feature[0]) ?></h3>
+                    <p><?= e($feature[1]) ?></p>
+                </article>
+            <?php endforeach; ?>
         </div>
     </div>
 </section>
@@ -130,7 +186,7 @@ $packageOrderUrl = !empty($package['inquiry_mode']) ? url('/contact') : (($packa
         <div class="section-head">
             <div>
                 <span class="section-kicker">Testimonials</span>
-                <h2>Placeholder client stories ready for your real reviews</h2>
+                <h2>Client review placeholders ready for your real testimonials</h2>
             </div>
         </div>
         <div class="testimonial-grid">
@@ -149,4 +205,12 @@ $packageOrderUrl = !empty($package['inquiry_mode']) ? url('/contact') : (($packa
 <?php endif; ?>
 
 <?php require APP_PATH . '/Views/partials/faqs.php'; ?>
+<?php
+$title = 'Ready to launch your website?';
+$text = 'Start with hosting, search your domain, or order a complete business website package through a clean WHMCS-connected flow.';
+$primaryText = 'Get Started';
+$primaryUrl = $settings['default_order_url'] ?: $whmcs->cartUrl();
+$secondaryText = 'Search Domain';
+$secondaryUrl = '#domain-search';
+?>
 <?php require APP_PATH . '/Views/partials/cta.php'; ?>

@@ -14,7 +14,7 @@ Production-ready plain PHP/MySQL website for Planetic Solutions with a responsiv
 1. Upload the project files to your cPanel site folder, usually `public_html`.
 2. Make sure `.htaccess` is uploaded. It protects `app/`, `database/`, `storage/` and `.env`.
 3. Create a MySQL database and user in cPanel.
-4. Import `database/schema.sql` into the database using phpMyAdmin.
+4. Import `database/schema.sql` into the database using phpMyAdmin. If you already imported an earlier version and only need the redesign content defaults, back up your database and import `database/redesign_update.sql`.
 5. Edit `.env` with your database credentials:
 
 ```env
@@ -113,6 +113,7 @@ Option 1: cPanel Git Version Control
 2. In cPanel, open Git Version Control and clone the repository into your site folder.
 3. Copy `.env.example` to `.env` if needed and fill in production values.
 4. Import `database/schema.sql`.
+   - If you already imported an earlier version and only want the redesign content defaults, import `database/redesign_update.sql` after backing up your database.
 5. Pull future changes from cPanel Git Version Control.
 
 Option 2: Manual deploy

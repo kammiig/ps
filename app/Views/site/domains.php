@@ -1,9 +1,19 @@
 <section class="page-hero">
-    <div class="container narrow">
-        <span class="section-kicker">Domain registration</span>
-        <h1>Search and Register Domains Through WHMCS</h1>
-        <p>Use the domain search below to continue into the WHMCS domain checker/cart. Display prices can be edited here, while checkout and live billing rates remain controlled by WHMCS.</p>
-        <?php $id = 'domain-page-search'; require APP_PATH . '/Views/partials/domain-search.php'; ?>
+    <div class="container page-hero-grid">
+        <div>
+            <span class="section-kicker">Domain registration</span>
+            <h1>Search and Register Domains Through WHMCS</h1>
+            <p>Use the domain search below to continue into the WHMCS domain checker/cart. Display prices can be edited here, while checkout and live billing rates remain controlled by WHMCS.</p>
+            <?php $id = 'domain-page-search'; require APP_PATH . '/Views/partials/domain-search.php'; ?>
+        </div>
+        <aside class="page-hero-card">
+            <span class="mini-label">Popular choices</span>
+            <div class="hero-tld-mini">
+                <?php foreach (array_slice($tlds, 0, 4) as $tld): ?>
+                    <span><?= e($tld['extension']) ?> <strong><?= e($tld['price']) ?></strong></span>
+                <?php endforeach; ?>
+            </div>
+        </aside>
     </div>
 </section>
 

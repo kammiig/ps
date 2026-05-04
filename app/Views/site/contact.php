@@ -1,12 +1,19 @@
 <section class="page-hero">
-    <div class="container narrow">
-        <span class="section-kicker">Contact</span>
-        <h1><?= e($page['title'] ?? 'Tell Us What You Need') ?></h1>
-        <?php if (!empty($page['body'])): ?>
-            <div class="content-body"><?= safe_html($page['body']) ?></div>
-        <?php else: ?>
-            <p>Ask about hosting, reseller hosting, domain registration, Cloudflare setup or the £200 website package.</p>
-        <?php endif; ?>
+    <div class="container page-hero-grid">
+        <div>
+            <span class="section-kicker">Contact</span>
+            <h1><?= e($page['title'] ?? 'Tell Us What You Need') ?></h1>
+            <?php if (!empty($page['body'])): ?>
+                <div class="content-body"><?= safe_html($page['body']) ?></div>
+            <?php else: ?>
+                <p>Ask about hosting, reseller hosting, domain registration, Cloudflare setup or the £200 website package.</p>
+            <?php endif; ?>
+        </div>
+        <aside class="page-hero-card">
+            <span class="mini-label">Sales and support</span>
+            <strong>WHMCS-connected ordering</strong>
+            <p>Use the form for website packages or service questions, and WHMCS for billing.</p>
+        </aside>
     </div>
 </section>
 

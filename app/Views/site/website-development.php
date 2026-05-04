@@ -3,14 +3,21 @@ $features = json_decode($package['features_json'] ?? '[]', true) ?: [];
 $packageOrderUrl = !empty($package['inquiry_mode']) ? url('/contact') : (($package['cta_url'] ?? '') ?: url('/contact'));
 ?>
 <section class="page-hero">
-    <div class="container narrow">
-        <span class="section-kicker">Website development package</span>
-        <h1>Complete Business Website in Just £200</h1>
-        <p>Professional business website setup with hosting support, domain registration support, mobile responsive design, Cloudflare CDN and 48 hour delivery.</p>
-        <div class="actions">
-            <a class="btn btn-primary" href="<?= e($packageOrderUrl) ?>"><?= e(($package['cta_text'] ?? '') ?: 'Order Now') ?> <?= icon('arrow') ?></a>
-            <a class="btn btn-outline" href="<?= e(url('/contact')) ?>">Ask a Question</a>
+    <div class="container page-hero-grid">
+        <div>
+            <span class="section-kicker">Website development package</span>
+            <h1>Complete Business Website in Just £200</h1>
+            <p>Professional business website setup with hosting support, domain registration support, mobile responsive design, Cloudflare CDN and 48 hour delivery.</p>
+            <div class="actions">
+                <a class="btn btn-primary" href="<?= e($packageOrderUrl) ?>"><?= e(($package['cta_text'] ?? '') ?: 'Order Now') ?> <?= icon('arrow') ?></a>
+                <a class="btn btn-outline" href="<?= e(url('/contact')) ?>">Ask a Question</a>
+            </div>
         </div>
+        <aside class="page-hero-card price-card">
+            <span class="mini-label">Fixed package price</span>
+            <strong>£200</strong>
+            <p>Website, hosting setup, SEO basics and Cloudflare CDN support.</p>
+        </aside>
     </div>
 </section>
 
@@ -19,7 +26,7 @@ $packageOrderUrl = !empty($package['inquiry_mode']) ? url('/contact') : (($packa
         <div>
             <span class="section-kicker">What is included</span>
             <h2>Premium setup without the premium agency bill</h2>
-            <p class="lead">Get a complete business website for just £200, including hosting setup, domain registration support, premium design tools where legally licensed, Envato templates/assets where legally licensed, stock images, basic content writing, SEO setup and free Cloudflare CDN. Delivery in just 48 hours.</p>
+            <p class="lead">Get a professional business website with hosting setup, domain registration support, premium design tools where legally licensed, Envato templates/assets where legally licensed, stock images, basic SEO setup and Cloudflare CDN. Delivery in just 48 hours.</p>
         </div>
         <div class="included-panel">
             <ul class="feature-list columns">

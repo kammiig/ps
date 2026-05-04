@@ -1,4 +1,4 @@
-<section class="page-hero compact">
+<section class="page-hero compact legal-hero">
     <div class="container narrow">
         <h1><?= e($page['title']) ?></h1>
     </div>
