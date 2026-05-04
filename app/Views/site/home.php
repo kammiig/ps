@@ -42,45 +42,46 @@ $websiteChecklist = [
             </div>
         </div>
         <div class="hosting-visual" aria-label="Planetic hosting platform visual">
-            <div class="visual-glow"></div>
-            <div class="visual-window">
-                <div class="visual-topbar">
-                    <span></span><span></span><span></span>
-                    <strong>Planetic Cloud Console</strong>
+            <div class="hero-console">
+                <div class="console-dashboard">
+                    <div class="console-topbar">
+                        <div class="window-dots"><span></span><span></span><span></span></div>
+                        <strong>Planetic Cloud Console</strong>
+                    </div>
+                    <div class="console-status">
+                        <div>
+                            <span class="mini-label">Domain + Hosting</span>
+                            <strong>planeticsolution.com</strong>
+                        </div>
+                        <em>Live</em>
+                    </div>
+                    <div class="console-stack">
+                        <div class="console-row">
+                            <span class="console-icon"><?= icon('panel') ?></span>
+                            <div><strong>cPanel</strong><small>&mdash; Website, email and files</small></div>
+                        </div>
+                        <div class="console-row">
+                            <span class="console-icon"><?= icon('shield') ?></span>
+                            <div><strong>SSL Active</strong><small>&mdash; HTTPS ready</small></div>
+                        </div>
+                        <div class="console-row">
+                            <span class="console-icon"><?= icon('cloud') ?></span>
+                            <div><strong>Cloudflare CDN</strong><small>&mdash; Speed and protection</small></div>
+                        </div>
+                        <div class="console-row">
+                            <span class="console-icon"><?= icon('globe') ?></span>
+                            <div><strong>WHMCS Billing</strong><small>&mdash; Orders and invoices</small></div>
+                        </div>
+                    </div>
+                    <div class="console-meter">
+                        <div class="server-title"><strong>Hosting stack</strong><small>Optimised for business</small></div>
+                        <div class="server-bars"><span></span><span></span><span></span></div>
+                    </div>
                 </div>
-                <div class="domain-panel">
-                    <div>
-                        <span class="mini-label">Domain + Hosting</span>
-                        <strong>planeticsolution.com</strong>
-                    </div>
-                    <em>Live</em>
-                </div>
-                <div class="stack-panel">
-                    <div class="stack-item">
-                        <span><?= icon('panel') ?></span>
-                        <div><strong>cPanel</strong><small>Website, email and files</small></div>
-                    </div>
-                    <div class="stack-item">
-                        <span><?= icon('shield') ?></span>
-                        <div><strong>SSL Active</strong><small>HTTPS ready</small></div>
-                    </div>
-                    <div class="stack-item">
-                        <span><?= icon('cloud') ?></span>
-                        <div><strong>Cloudflare CDN</strong><small>Speed and protection</small></div>
-                    </div>
-                    <div class="stack-item">
-                        <span><?= icon('globe') ?></span>
-                        <div><strong>WHMCS Billing</strong><small>Orders and invoices</small></div>
-                    </div>
-                </div>
-                <div class="server-card">
-                    <div class="server-title"><strong>Hosting stack</strong><small>Optimised for business</small></div>
-                    <div class="server-bars"><span></span><span></span><span></span></div>
-                </div>
+                <div class="floating-card uptime-card"><strong>99.9%</strong><span>Uptime-ready setup</span></div>
+                <div class="floating-card delivery-card"><strong>48h</strong><span>Website delivery</span></div>
+                <div class="floating-card cdn-card"><?= icon('cloud') ?><span>Cloudflare CDN</span></div>
             </div>
-            <div class="floating-card uptime-card"><strong>99.9%</strong><span>Uptime-ready setup</span></div>
-            <div class="floating-card delivery-card"><strong>48h</strong><span>Website delivery</span></div>
-            <div class="floating-card cdn-card"><?= icon('cloud') ?><span>Cloudflare CDN</span></div>
         </div>
     </div>
 </section>

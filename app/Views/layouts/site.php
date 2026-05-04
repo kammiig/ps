@@ -52,8 +52,8 @@ $allSchemas = array_values(array_filter([$organizationSchema, $localSchema, ...(
     <meta name="twitter:title" content="<?= e($meta['og_title'] ?: $meta['title']) ?>">
     <meta name="twitter:description" content="<?= e($meta['description']) ?>">
     <?php if (!empty($meta['og_image'])): ?><meta name="twitter:image" content="<?= e($meta['og_image']) ?>"><?php endif; ?>
-    <link rel="preload" href="<?= e(asset('css/style.css')) ?>" as="style">
-    <link rel="stylesheet" href="<?= e(asset('css/style.css')) ?>">
+    <link rel="preload" href="<?= e(asset('css/style.css')) ?>?v=20260505-hero-fix" as="style">
+    <link rel="stylesheet" href="<?= e(asset('css/style.css')) ?>?v=20260505-hero-fix">
     <?php foreach ($allSchemas as $schema): ?>
         <script type="application/ld+json"><?= json_encode($schema, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?></script>
     <?php endforeach; ?>

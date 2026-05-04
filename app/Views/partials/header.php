@@ -19,9 +19,9 @@ $logo = upload_url($settings['logo_url'] ?? '');
         </button>
         <nav class="site-nav" aria-label="Main navigation" data-nav>
             <a class="<?= e(is_active('/domains')) ?>" href="<?= e(url('/domains')) ?>">Domains</a>
-            <div class="nav-group">
-                <a class="<?= e(is_active('/hosting')) ?>" href="<?= e(url('/hosting')) ?>">Hosting</a>
-                <div class="nav-dropdown" aria-label="Hosting links">
+            <div class="nav-item has-dropdown">
+                <a class="nav-link <?= e(is_active('/hosting')) ?>" href="<?= e(url('/hosting')) ?>">Hosting</a>
+                <div class="nav-dropdown" aria-label="Hosting menu">
                     <a href="<?= e(url('/hosting')) ?>">All Hosting Plans</a>
                     <a href="<?= e(url('/wordpress-hosting')) ?>">WordPress Hosting</a>
                     <a href="<?= e(url('/hosting#reseller-hosting')) ?>">Reseller Hosting</a>
