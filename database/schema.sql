@@ -200,10 +200,10 @@ INSERT INTO settings (setting_key, setting_value, updated_at) VALUES
 ('linkedin_url', '', NOW()),
 ('x_url', '', NOW()),
 ('whmcs_client_area_url', 'https://planeticsolution.com/clientarea/', NOW()),
-('whmcs_api_enabled', '0', NOW()),
 ('whmcs_api_url', 'https://planeticsolution.com/clientarea/includes/api.php', NOW()),
 ('whmcs_api_identifier', '', NOW()),
 ('whmcs_api_secret', '', NOW()),
+('domain_hosting_pid', '2', NOW()),
 ('default_order_url', 'https://planeticsolution.com/clientarea/cart.php', NOW()),
 ('google_analytics', '', NOW()),
 ('recaptcha_enabled', '0', NOW()),
@@ -276,7 +276,7 @@ INSERT INTO faqs (page_key, question, answer, is_active, sort_order, created_at,
 ('website-development', 'Are Elementor Pro and Envato assets included?', '<p>They are included only where legally licensed by Planetic Solutions. This wording is intentionally clear so the offer remains compliant.</p>', 1, 20, NOW(), NOW()),
 ('website-development', 'How fast is delivery?', '<p>The offer states delivery in 48 hours, subject to receiving the required content and access details.</p>', 1, 30, NOW(), NOW()),
 ('domains', 'Are domain prices live from WHMCS?', '<p>Checkout and billing rates are confirmed in WHMCS. The display cards on this website can be edited manually if live API pricing is not enabled.</p>', 1, 10, NOW(), NOW()),
-('domains', 'What happens after I search a domain?', '<p>The website redirects to the WHMCS domain checker/cart with the searched domain pre-filled, or shows an availability result if WHMCS API checking is enabled.</p>', 1, 20, NOW(), NOW());
+('domains', 'What happens after I search a domain?', '<p>The website shows a custom availability results page using the backend WHMCS API integration. When you choose a domain, checkout and billing continue securely inside WHMCS.</p>', 1, 20, NOW(), NOW());
 
 INSERT INTO blog_categories (name, slug, created_at, updated_at) VALUES
 ('Hosting Guides', 'hosting-guides', NOW(), NOW()),

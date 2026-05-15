@@ -3,7 +3,7 @@
         <div>
             <span class="section-kicker">Domain registration</span>
             <h1>Search and Register Domains Through WHMCS</h1>
-            <p>Use the domain search below to continue into the WHMCS domain checker/cart. Display prices can be edited here, while checkout and live billing rates remain controlled by WHMCS.</p>
+            <p>Use the domain search below to check availability on this website, then continue securely to WHMCS checkout for registration and billing.</p>
             <?php $id = 'domain-page-search'; require APP_PATH . '/Views/partials/domain-search.php'; ?>
         </div>
         <aside class="page-hero-card">
@@ -40,7 +40,7 @@
 
 <section class="section muted">
     <div class="container feature-grid">
-        <article><div class="icon-pill"><?= icon('globe') ?></div><h3>Domain search</h3><p>Send visitors directly into the WHMCS domain registration flow with their search pre-filled.</p></article>
+        <article><div class="icon-pill"><?= icon('globe') ?></div><h3>Domain search</h3><p>Show custom availability results first, then send visitors into the WHMCS registration flow when they choose a domain.</p></article>
         <article><div class="icon-pill"><?= icon('shield') ?></div><h3>Billing handled in WHMCS</h3><p>Orders, renewals, invoices and client account management remain in the WHMCS client area.</p></article>
         <article><div class="icon-pill"><?= icon('panel') ?></div><h3>Editable TLD cards</h3><p>Update displayed extensions, fallback prices and WHMCS URLs in the admin dashboard.</p></article>
     </div>

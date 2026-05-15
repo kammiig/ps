@@ -73,12 +73,11 @@ final class AdminController extends Controller
                     'company_name', 'tagline', 'app_url', 'logo_url', 'favicon_url', 'og_image',
                     'admin_email', 'mail_from', 'phone', 'whatsapp_number', 'address',
                     'facebook_url', 'instagram_url', 'linkedin_url', 'x_url',
-                    'whmcs_client_area_url', 'whmcs_api_url', 'whmcs_api_identifier', 'whmcs_api_secret',
+                    'whmcs_client_area_url', 'whmcs_api_url', 'whmcs_api_identifier', 'whmcs_api_secret', 'domain_hosting_pid',
                     'google_analytics', 'recaptcha_site_key', 'recaptcha_secret_key',
                     'cloudflare_zone_id', 'cloudflare_api_token', 'default_order_url',
                 ]);
 
-                $data['whmcs_api_enabled'] = $this->postedBool('whmcs_api_enabled');
                 $data['recaptcha_enabled'] = $this->postedBool('recaptcha_enabled');
                 $data['logo_url'] = Upload::image('logo_upload', $data['logo_url'] ?: ($settings['logo_url'] ?? null));
                 $data['favicon_url'] = Upload::image('favicon_upload', $data['favicon_url'] ?: ($settings['favicon_url'] ?? null));
@@ -116,10 +115,10 @@ final class AdminController extends Controller
                 ['name' => 'linkedin_url', 'label' => 'LinkedIn URL', 'type' => 'url'],
                 ['name' => 'x_url', 'label' => 'X/Twitter URL', 'type' => 'url'],
                 ['name' => 'whmcs_client_area_url', 'label' => 'WHMCS Client Area URL', 'type' => 'url'],
-                ['name' => 'whmcs_api_enabled', 'label' => 'Enable WHMCS API Domain Checks', 'type' => 'checkbox'],
                 ['name' => 'whmcs_api_url', 'label' => 'WHMCS API URL', 'type' => 'url'],
                 ['name' => 'whmcs_api_identifier', 'label' => 'WHMCS API Identifier', 'type' => 'text'],
                 ['name' => 'whmcs_api_secret', 'label' => 'WHMCS API Secret', 'type' => 'password'],
+                ['name' => 'domain_hosting_pid', 'label' => 'Domain + Hosting Product ID', 'type' => 'text'],
                 ['name' => 'default_order_url', 'label' => 'Default Get Started / WHMCS Order URL', 'type' => 'url'],
                 ['name' => 'google_analytics', 'label' => 'Google Analytics / Tracking Code', 'type' => 'textarea'],
                 ['name' => 'recaptcha_enabled', 'label' => 'Enable Google reCAPTCHA', 'type' => 'checkbox'],

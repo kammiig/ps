@@ -142,6 +142,19 @@ final class SiteController extends Controller
         ]));
     }
 
+    public function domainSearchPage(): string
+    {
+        $domain = $this->normaliseDomain((string) ($_GET['domain'] ?? ''));
+
+        return $this->render('site/domain-search', $this->baseData('domains', [
+            'domain' => $domain,
+            'breadcrumbs' => [
+                ['name' => 'Home', 'url' => url('/')],
+                ['name' => 'Domain Search', 'url' => url('/domain-search')],
+            ],
+        ]));
+    }
+
     public function domainSearch(): string
     {
         if (!Csrf::verify($_POST['_csrf'] ?? null)) {
@@ -154,22 +167,74 @@ final class SiteController extends Controller
             $this->redirect(url('/domains'));
         }
 
-        $apiEnabled = (string) ($this->settings['whmcs_api_enabled'] ?? '0') === '1';
-        if (!$apiEnabled || !str_contains($domain, '.')) {
-            $this->redirect($this->whmcs->domainSearchUrl($domain));
+        $this->redirect(url('/domain-search?domain=' . rawurlencode($domain)));
+    }
+
+    public function apiDomainSearch(): string
+    {
+        $domain = $this->normaliseDomain((string) ($_GET['domain'] ?? ''));
+        $parsed = $this->splitDomain($domain);
+
+        if (!$parsed) {
+            return $this->json([
+                'ok' => false,
+                'message' => 'Enter a valid domain using .com, .net, .org, .co.uk, .xyz, or .online.',
+            ], 422);
         }
 
-        $result = $this->whmcs->checkDomain($domain);
-        if (!$result['ok']) {
-            $this->redirect($this->whmcs->domainSearchUrl($domain));
+        $pricing = $this->whmcs->tldPricing(1);
+        if (!$pricing['ok']) {
+            return $this->json([
+                'ok' => false,
+                'message' => $pricing['message'] ?? 'Unable to fetch live WHMCS domain pricing.',
+            ], 502);
         }
 
-        return $this->render('site/domain-result', $this->baseData('domains', [
-            'domain' => $domain,
-            'result' => $result,
-            'registerUrl' => $this->whmcs->domainSearchUrl($domain),
-            'transferUrl' => $this->whmcs->domainTransferUrl($domain),
-        ]));
+        $tlds = ['.com', '.net', '.org', '.co.uk', '.xyz', '.online'];
+        $orderedTlds = array_values(array_unique(array_merge([$parsed['tld']], $tlds)));
+        $currency = $this->currencyPrefix($pricing['currency'] ?? []);
+        $hostingPid = $this->hostingPid();
+        $results = [];
+
+        foreach ($orderedTlds as $tld) {
+            if (!in_array($tld, $tlds, true)) {
+                continue;
+            }
+
+            $candidate = $parsed['sld'] . $tld;
+            $availability = $this->whmcs->checkDomain($candidate);
+            if (!$availability['ok']) {
+                return $this->json([
+                    'ok' => false,
+                    'message' => $availability['message'] ?? 'Unable to check domain availability through WHMCS.',
+                ], 502);
+            }
+
+            $results[] = [
+                'domain' => $candidate,
+                'sld' => $parsed['sld'],
+                'tld' => $tld,
+                'available' => (bool) $availability['available'],
+                'price' => $this->whmcs->priceForTld($pricing['pricing'], $tld),
+                'currency' => $currency,
+                'type' => $candidate === $domain ? 'match' : 'alternative',
+                'domain_url' => $this->whmcs->domainSearchUrl($candidate),
+                'hosting_url' => $this->domainHostingUrl($parsed['sld'], $tld, $hostingPid),
+            ];
+        }
+
+        $match = $results[0] ?? null;
+
+        return $this->json([
+            'ok' => true,
+            'searched' => $domain,
+            'sld' => $parsed['sld'],
+            'tld' => $parsed['tld'],
+            'available' => (bool) ($match['available'] ?? false),
+            'currency' => $currency,
+            'hosting_pid' => $hostingPid,
+            'results' => $results,
+        ]);
     }
 
     public function about(): string
@@ -414,6 +479,70 @@ final class SiteController extends Controller
         $domain = preg_replace('#/.*$#', '', $domain) ?: $domain;
         $domain = preg_replace('/[^a-z0-9.-]/', '', $domain) ?: '';
         return trim($domain, '.-');
+    }
+
+    private function splitDomain(string $domain): ?array
+    {
+        $supported = ['.co.uk', '.online', '.com', '.net', '.org', '.xyz'];
+        foreach ($supported as $tld) {
+            if (!str_ends_with($domain, $tld)) {
+                continue;
+            }
+
+            $sld = substr($domain, 0, -strlen($tld));
+            if (str_contains($sld, '.') || !preg_match('/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/', $sld)) {
+                return null;
+            }
+
+            return ['sld' => $sld, 'tld' => $tld];
+        }
+
+        return null;
+    }
+
+    private function hostingPid(): string
+    {
+        $plans = $this->content->hostingPlans(null, true);
+        usort($plans, static fn (array $a, array $b): int => (int) $b['is_highlighted'] <=> (int) $a['is_highlighted']);
+
+        foreach ($plans as $plan) {
+            $query = parse_url($plan['whmcs_url'] ?? '', PHP_URL_QUERY);
+            if (!$query) {
+                continue;
+            }
+
+            parse_str($query, $params);
+            if (!empty($params['pid'])) {
+                return (string) $params['pid'];
+            }
+        }
+
+        $configuredPid = trim((string) ($this->settings['domain_hosting_pid'] ?? ''));
+        return $configuredPid !== '' ? $configuredPid : env('DOMAIN_HOSTING_PID', 'HOSTING_PID_HERE');
+    }
+
+    private function domainHostingUrl(string $sld, string $tld, string $pid): string
+    {
+        return $this->whmcs->cartUrl('cart.php?' . http_build_query([
+            'a' => 'add',
+            'pid' => $pid,
+            'domainoption' => 'register',
+            'sld' => $sld,
+            'tld' => $tld,
+        ]));
+    }
+
+    private function currencyPrefix(array $currency): string
+    {
+        $prefix = (string) ($currency['prefix'] ?? '');
+        return $prefix !== '' ? html_entity_decode($prefix, ENT_QUOTES, 'UTF-8') : '£';
+    }
+
+    private function json(array $payload, int $status = 200): string
+    {
+        http_response_code($status);
+        header('Content-Type: application/json; charset=UTF-8');
+        return json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '{}';
     }
 
     private function serviceSchema(string $name, string $description): array

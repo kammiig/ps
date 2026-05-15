@@ -52,8 +52,8 @@ $allSchemas = array_values(array_filter([$organizationSchema, $localSchema, ...(
     <meta name="twitter:title" content="<?= e($meta['og_title'] ?: $meta['title']) ?>">
     <meta name="twitter:description" content="<?= e($meta['description']) ?>">
     <?php if (!empty($meta['og_image'])): ?><meta name="twitter:image" content="<?= e($meta['og_image']) ?>"><?php endif; ?>
-    <link rel="preload" href="<?= e(asset('css/style.css')) ?>?v=20260505-hero-fix" as="style">
-    <link rel="stylesheet" href="<?= e(asset('css/style.css')) ?>?v=20260505-hero-fix">
+    <link rel="preload" href="<?= e(asset('css/style.css')) ?>?v=20260515-domain-search" as="style">
+    <link rel="stylesheet" href="<?= e(asset('css/style.css')) ?>?v=20260515-domain-search">
     <?php foreach ($allSchemas as $schema): ?>
         <script type="application/ld+json"><?= json_encode($schema, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?></script>
     <?php endforeach; ?>
@@ -65,7 +65,7 @@ $allSchemas = array_values(array_filter([$organizationSchema, $localSchema, ...(
     <?= $content ?>
 </main>
 <?php require APP_PATH . '/Views/partials/footer.php'; ?>
-<script src="<?= e(asset('js/app.js')) ?>" defer></script>
+<script src="<?= e(asset('js/app.js')) ?>?v=20260515-domain-search" defer></script>
 <?php if (($settings['recaptcha_enabled'] ?? '0') === '1' && !empty($settings['recaptcha_site_key'])): ?>
     <script src="https://www.google.com/recaptcha/api.js" async defer></script>
 <?php endif; ?>

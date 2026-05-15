@@ -1,6 +1,6 @@
 # Planetic Solutions Website
 
-Production-ready plain PHP/MySQL website for Planetic Solutions with a responsive hosting-company frontend, WHMCS order links, domain search redirect/API support, SEO controls, blog, editable legal pages, contact inquiry storage and a secure admin CMS.
+Production-ready plain PHP/MySQL website for Planetic Solutions with a responsive hosting-company frontend, WHMCS order links, a custom domain search results flow backed by the WHMCS API, SEO controls, blog, editable legal pages, contact inquiry storage and a secure admin CMS.
 
 ## Requirements
 
@@ -47,11 +47,34 @@ In Admin > Settings, configure:
 - WHMCS API URL, usually `https://planeticsolution.com/clientarea/includes/api.php`
 - WHMCS API Identifier
 - WHMCS API Secret
-- Enable WHMCS API Domain Checks
+- Domain hosting product ID, either by adding `DOMAIN_HOSTING_PID` in `.env` or by setting a WHMCS product URL with `pid=PRODUCT_ID` on a highlighted hosting plan
 
-If API credentials are not enabled, domain searches redirect to:
+The `.env` file should include:
 
-`/clientarea/cart.php?a=add&domain=register&query=searched-domain`
+```env
+WHMCS_URL=https://planeticsolution.com/clientarea
+WHMCS_API_IDENTIFIER=your_identifier
+WHMCS_API_SECRET=your_secret
+DOMAIN_HOSTING_PID=2
+```
+
+The homepage domain form now sends visitors to:
+
+`/domain-search?domain=searched-domain`
+
+The results page calls the backend-only endpoint:
+
+`/api/domain-search?domain=searched-domain`
+
+That endpoint validates the domain server-side, calls WHMCS `DomainWhois`, fetches live WHMCS prices with `GetTLDPricing`, and returns safe JSON for the frontend. WHMCS API credentials are never exposed in browser JavaScript.
+
+Domain-only buttons continue to send visitors to:
+
+`https://planeticsolution.com/clientarea/cart.php?a=add&domain=register&query=searched-domain`
+
+Domain plus hosting buttons use:
+
+`https://planeticsolution.com/clientarea/cart.php?a=add&pid=PRODUCT_ID&domainoption=register&sld=example&tld=.com`
 
 Hosting and website package buttons use editable WHMCS URLs. Update them in:
 
@@ -68,7 +91,7 @@ https://planeticsolution.com/clientarea/cart.php?a=add&pid=PRODUCT_ID
 
 ## Domain Pricing
 
-Live domain checkout pricing should remain controlled inside WHMCS. The website has editable TLD display cards for `.com`, `.co.uk`, `.net` and `.org`. If you do not use WHMCS API pricing, update display prices manually in Admin > Domains/TLDs.
+Live domain checkout pricing should remain controlled inside WHMCS. The `/domain-search` results page reads live prices for `.com`, `.net`, `.org`, `.co.uk`, `.xyz` and `.online` from WHMCS `GetTLDPricing`. The website also has editable TLD display cards for marketing sections; update those manually in Admin > Domains/TLDs when needed.
 
 ## Admin CMS Features
 

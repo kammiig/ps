@@ -31,7 +31,8 @@ final class ContentRepository
 
         $settings['company_name'] ??= env('APP_NAME', 'Planetic Solutions');
         $settings['app_url'] ??= env('APP_URL', '');
-        $settings['whmcs_client_area_url'] ??= env('WHMCS_CLIENT_AREA_URL', 'https://planeticsolution.com/clientarea/');
+        $settings['whmcs_client_area_url'] ??= env('WHMCS_URL', env('WHMCS_CLIENT_AREA_URL', 'https://planeticsolution.com/clientarea/'));
+        $settings['domain_hosting_pid'] ??= env('DOMAIN_HOSTING_PID', '');
         $settings['admin_email'] ??= env('ADMIN_EMAIL', '');
         $settings['mail_from'] ??= env('MAIL_FROM', '');
 
