@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Admin Login | <?= e($settings['company_name'] ?? 'Planetic Solutions') ?></title>
-    <link rel="stylesheet" href="<?= e(asset('css/style.css')) ?>?v=20260517-main-checkout">
+    <link rel="stylesheet" href="<?= e(asset('css/style.css')) ?>?v=20260518-checkout-fix">
 </head>
 <body class="admin-auth">
     <?= $content ?>

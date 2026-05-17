@@ -183,18 +183,14 @@ final class SiteController extends Controller
         }
 
         $pricing = $this->whmcs->tldPricing(1);
-        if (!$pricing['ok']) {
-            return $this->json([
-                'ok' => false,
-                'message' => $pricing['message'] ?? 'Unable to fetch live WHMCS domain pricing.',
-            ], 502);
-        }
+        $pricingOk = (bool) ($pricing['ok'] ?? false);
 
         $tlds = $this->supportedTlds();
         $orderedTlds = array_values(array_unique(array_merge([$parsed['tld']], $tlds)));
-        $currency = $this->currencyPrefix($pricing['currency'] ?? []);
+        $currency = $pricingOk ? $this->currencyPrefix($pricing['currency'] ?? []) : '£';
         $hostingPid = $this->hostingPid();
         $results = [];
+        $availabilityChecked = true;
 
         foreach ($orderedTlds as $tld) {
             if (!in_array($tld, $tlds, true)) {
@@ -202,12 +198,9 @@ final class SiteController extends Controller
             }
 
             $candidate = $parsed['sld'] . $tld;
-            $availability = $this->whmcs->checkDomain($candidate);
+            $availability = $availabilityChecked ? $this->whmcs->checkDomain($candidate) : ['ok' => false];
             if (!$availability['ok']) {
-                return $this->json([
-                    'ok' => false,
-                    'message' => $availability['message'] ?? 'Unable to check domain availability through WHMCS.',
-                ], 502);
+                $availabilityChecked = false;
             }
 
             $domainCheckoutUrl = url('/checkout?' . http_build_query([
@@ -223,8 +216,8 @@ final class SiteController extends Controller
                 'domain' => $candidate,
                 'sld' => $parsed['sld'],
                 'tld' => $tld,
-                'available' => (bool) $availability['available'],
-                'price' => $this->whmcs->priceForTld($pricing['pricing'], $tld),
+                'available' => $availability['ok'] ? (bool) $availability['available'] : null,
+                'price' => $pricingOk ? $this->whmcs->priceForTld($pricing['pricing'], $tld) : $this->configuredDomainPrice($tld),
                 'currency' => $currency,
                 'type' => $candidate === $domain ? 'match' : 'alternative',
                 'domain_url' => $domainCheckoutUrl,
@@ -241,7 +234,9 @@ final class SiteController extends Controller
             'searched' => $domain,
             'sld' => $parsed['sld'],
             'tld' => $parsed['tld'],
-            'available' => (bool) ($match['available'] ?? false),
+            'available' => $availabilityChecked ? (bool) ($match['available'] ?? false) : null,
+            'availability_checked' => $availabilityChecked,
+            'message' => $availabilityChecked ? null : 'Live WHMCS availability is temporarily unavailable. WHMCS will validate the domain during checkout.',
             'currency' => $currency,
             'hosting_pid' => $hostingPid,
             'results' => $results,
@@ -296,11 +291,7 @@ final class SiteController extends Controller
 
         if ($this->orderRegistersDomain($data['order_type'])) {
             $availability = $this->whmcs->checkDomain($data['domain']);
-            if (!$availability['ok']) {
-                return $this->checkout(['Unable to check domain availability with WHMCS. Please try again.'], $data);
-            }
-
-            if (!$availability['available']) {
+            if ($availability['ok'] && !$availability['available']) {
                 return $this->checkout(['That domain is no longer available. Please search another domain.'], $data);
             }
         }
@@ -632,7 +623,11 @@ final class SiteController extends Controller
             $errors[] = 'Choose a valid order type.';
         }
 
-        if ($data['domain'] === '' || !preg_match('/^[a-z0-9][a-z0-9.-]+\.[a-z.]{2,}$/', $data['domain'])) {
+        if ($this->orderRegistersDomain($data['order_type']) && $data['domain'] === '') {
+            $errors[] = 'Enter a valid domain name.';
+        }
+
+        if ($data['domain'] !== '' && !preg_match('/^[a-z0-9][a-z0-9.-]+\.[a-z.]{2,}$/', $data['domain'])) {
             $errors[] = 'Enter a valid domain name.';
         }
 
@@ -673,7 +668,7 @@ final class SiteController extends Controller
         $config = $this->whmcs->checkoutConfig();
         $payload = [];
         $domain = $data['domain'];
-        $registrationPeriod = $this->domainRegistrationPeriod($domain);
+        $registrationPeriod = $domain !== '' ? $this->domainRegistrationPeriod($domain) : 1;
 
         if ($data['order_type'] === 'domain') {
             $payload['domain'] = [$domain];
@@ -690,12 +685,14 @@ final class SiteController extends Controller
             }
 
             $payload['pid'] = [$pid];
-            $payload['domain'] = [$domain];
             $payload['billingcycle'] = [$data['billing_cycle'] ?: ($plan['checkout_billing_cycle'] ?? 'monthly')];
 
             if ($data['order_type'] === 'bundle') {
+                $payload['domain'] = [$domain];
                 $payload['domaintype'] = ['register'];
                 $payload['regperiod'] = [$registrationPeriod];
+            } elseif ($domain !== '') {
+                $payload['domain'] = [$domain];
             }
 
             return ['ok' => true, 'payload' => $this->appendNameservers($payload)];
@@ -708,18 +705,20 @@ final class SiteController extends Controller
         }
 
         $payload['pid'] = [$pid];
-        $payload['domain'] = [$domain];
         $cycle = (string) ($website['billing_cycle'] ?? '');
         if ($cycle !== '' && $cycle !== 'onetime') {
             $payload['billingcycle'] = [$cycle];
         }
 
         if (!empty($website['register_domain'])) {
+            $payload['domain'] = [$domain];
             $payload['domaintype'] = ['register'];
             $payload['regperiod'] = [$registrationPeriod];
             if (array_key_exists('domain_price_override', $website)) {
                 $payload['domainpriceoverride'] = [(string) $website['domain_price_override']];
             }
+        } elseif ($domain !== '') {
+            $payload['domain'] = [$domain];
         }
 
         return ['ok' => true, 'payload' => $this->appendNameservers($payload)];
@@ -771,6 +770,13 @@ final class SiteController extends Controller
         $parsed = $this->splitDomain($domain);
         $pricing = $this->whmcs->checkoutConfig()['domain_pricing'] ?? [];
         return max(1, (int) ($pricing[$parsed['tld'] ?? '']['regperiod'] ?? 1));
+    }
+
+    private function configuredDomainPrice(string $tld): ?string
+    {
+        $pricing = $this->whmcs->checkoutConfig()['domain_pricing'] ?? [];
+        $price = $pricing[$tld]['price'] ?? null;
+        return $price === null || $price === '' ? null : number_format((float) $price, 2, '.', '');
     }
 
     private function normaliseDomain(string $domain): string

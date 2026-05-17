@@ -2,6 +2,18 @@
 $orderType = $old['order_type'] ?? 'bundle';
 $selectedPlan = $old['hosting_plan'] ?? ($plans[0]['slug'] ?? '');
 $domain = $old['domain'] ?? '';
+$usesHosting = in_array($orderType, ['hosting', 'bundle'], true);
+$isHostingOnly = $orderType === 'hosting';
+$isDomainOnly = $orderType === 'domain';
+$domainTitle = $isHostingOnly ? 'Existing domain' : 'Domain';
+$domainLabel = $isHostingOnly ? 'Existing domain name (optional)' : 'Domain name';
+$domainHelp = $isHostingOnly
+    ? 'Optional. Add the domain you want this hosting account linked to, or leave blank and provide it later.'
+    : ($isDomainOnly
+        ? 'This domain will be registered through WHMCS after checkout creates your invoice.'
+        : ($orderType === 'website'
+            ? 'Enter the domain you want for the website package. It will be checked server-side where domain registration is included.'
+            : 'This domain will be checked again server-side before the WHMCS order is created.'));
 $countries = ['GB' => 'United Kingdom', 'US' => 'United States', 'PK' => 'Pakistan', 'IE' => 'Ireland', 'CA' => 'Canada', 'AU' => 'Australia'];
 $websitePid = (int) (($checkoutConfig['website_package']['pid'] ?? 0));
 ?>
@@ -19,14 +31,14 @@ $websitePid = (int) (($checkoutConfig['website_package']['pid'] ?? 0));
             </div>
         <?php endif; ?>
 
-        <form class="checkout-layout" action="<?= e(url('/checkout')) ?>" method="post">
+        <form class="checkout-layout" action="<?= e(url('/checkout')) ?>" method="post" data-checkout-form>
             <input type="hidden" name="_csrf" value="<?= e($csrfToken) ?>">
 
             <div class="checkout-main">
-                <section class="checkout-panel">
+                <section class="checkout-panel" data-checkout-section="choice">
                     <div class="section-head compact">
                         <div>
-                            <span class="section-kicker">Step 1</span>
+                            <span class="section-kicker" data-checkout-step>Step 1</span>
                             <h2>Choose what you need</h2>
                         </div>
                     </div>
@@ -48,24 +60,24 @@ $websitePid = (int) (($checkoutConfig['website_package']['pid'] ?? 0));
                     </div>
                 </section>
 
-                <section class="checkout-panel">
+                <section class="checkout-panel" data-checkout-section="domain">
                     <div class="section-head compact">
                         <div>
-                            <span class="section-kicker">Step 2</span>
-                            <h2>Domain</h2>
+                            <span class="section-kicker" data-checkout-step>Step 2</span>
+                            <h2 data-domain-title><?= e($domainTitle) ?></h2>
                         </div>
                     </div>
                     <label>
-                        <span>Domain name</span>
-                        <input name="domain" type="text" inputmode="url" autocomplete="off" placeholder="example.com" value="<?= e($domain) ?>" required>
+                        <span data-domain-label><?= e($domainLabel) ?></span>
+                        <input name="domain" type="text" inputmode="url" autocomplete="off" placeholder="<?= $isHostingOnly ? 'your-existing-domain.com' : 'example.com' ?>" value="<?= e($domain) ?>" <?= $isHostingOnly ? '' : 'required' ?>>
                     </label>
-                    <p class="checkout-help">For domain-only, domain + hosting and website package orders, this domain will be checked again server-side before the WHMCS order is created.</p>
+                    <p class="checkout-help" data-domain-help><?= e($domainHelp) ?></p>
                 </section>
 
-                <section class="checkout-panel">
+                <section class="checkout-panel" data-checkout-section="hosting" <?= $usesHosting ? '' : 'hidden' ?>>
                     <div class="section-head compact">
                         <div>
-                            <span class="section-kicker">Step 3</span>
+                            <span class="section-kicker" data-checkout-step>Step 3</span>
                             <h2>Hosting package</h2>
                         </div>
                     </div>
@@ -83,10 +95,10 @@ $websitePid = (int) (($checkoutConfig['website_package']['pid'] ?? 0));
                     <input type="hidden" name="billing_cycle" value="<?= e($old['billing_cycle'] ?? '') ?>">
                 </section>
 
-                <section class="checkout-panel">
+                <section class="checkout-panel" data-checkout-section="details">
                     <div class="section-head compact">
                         <div>
-                            <span class="section-kicker">Step 4</span>
+                            <span class="section-kicker" data-checkout-step>Step 4</span>
                             <h2>Customer details</h2>
                         </div>
                     </div>
