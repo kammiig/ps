@@ -1,6 +1,6 @@
 # Planetic Solutions Website
 
-Production-ready plain PHP/MySQL website for Planetic Solutions with a responsive hosting-company frontend, WHMCS order links, a custom domain search results flow backed by the WHMCS API, SEO controls, blog, editable legal pages, contact inquiry storage and a secure admin CMS.
+Production-ready plain PHP/MySQL website for Planetic Solutions with a responsive hosting-company frontend, main-site checkout, WHMCS-backed billing/orders/domains/provisioning, SEO controls, blog, editable legal pages, contact inquiry storage and a secure admin CMS.
 
 ## Requirements
 
@@ -41,13 +41,14 @@ Your WHMCS client area URL is already seeded as:
 
 `https://planeticsolution.com/clientarea/`
 
-In Admin > Settings, configure:
+In Admin > Settings and `.env`, configure:
 
 - WHMCS Client Area URL
 - WHMCS API URL, usually `https://planeticsolution.com/clientarea/includes/api.php`
 - WHMCS API Identifier
 - WHMCS API Secret
-- Domain hosting product ID, either by adding `DOMAIN_HOSTING_PID` in `.env` or by setting a WHMCS product URL with `pid=PRODUCT_ID` on a highlighted hosting plan
+- WHMCS payment gateway system name, for example `stripe` or `paypal`
+- Product IDs for hosting plans and the £200 website package
 
 The `.env` file should include:
 
@@ -55,7 +56,12 @@ The `.env` file should include:
 WHMCS_URL=https://planeticsolution.com/clientarea
 WHMCS_API_IDENTIFIER=your_identifier
 WHMCS_API_SECRET=your_secret
-DOMAIN_HOSTING_PID=2
+WHMCS_PAYMENT_METHOD=stripe
+WHMCS_STARTER_HOSTING_PID=1
+WHMCS_BUSINESS_HOSTING_PID=2
+WHMCS_WORDPRESS_HOSTING_PID=3
+WHMCS_RESELLER_HOSTING_PID=4
+WHMCS_WEBSITE_PACKAGE_PID=5
 ```
 
 The homepage domain form now sends visitors to:
@@ -68,26 +74,19 @@ The results page calls the backend-only endpoint:
 
 That endpoint validates the domain server-side, calls WHMCS `DomainWhois`, fetches live WHMCS prices with `GetTLDPricing`, and returns safe JSON for the frontend. WHMCS API credentials are never exposed in browser JavaScript.
 
-Domain-only buttons continue to send visitors to:
+Domain-only, hosting-only, domain + hosting and website package buttons now send visitors to:
 
-`https://planeticsolution.com/clientarea/cart.php?a=add&domain=register&query=searched-domain`
+`/checkout`
 
-Domain plus hosting buttons use:
+The checkout page creates or finds the WHMCS client, calls `AddOrder`, and redirects the customer to the WHMCS invoice/payment page. WHMCS remains available for invoices, service management, support tickets and renewals.
 
-`https://planeticsolution.com/clientarea/cart.php?a=add&pid=PRODUCT_ID&domainoption=register&sld=example&tld=.com`
+Hosting and website package product IDs can be updated in:
 
-Hosting and website package buttons use editable WHMCS URLs. Update them in:
+- `.env`
+- `app/config/whmcs.php`
+- Admin > Hosting Plans, where existing WHMCS product URLs are still used as a PID fallback
 
-- Admin > Hosting Plans
-- Admin > Website Package
-- Admin > Domains/TLDs
-- Admin > Settings > Default Get Started / WHMCS Order URL
-
-Typical WHMCS product URL:
-
-```text
-https://planeticsolution.com/clientarea/cart.php?a=add&pid=PRODUCT_ID
-```
+Full setup notes are in `docs/main-site-checkout.md`.
 
 ## Domain Pricing
 
@@ -96,7 +95,7 @@ Live domain checkout pricing should remain controlled inside WHMCS. The `/domain
 ## Admin CMS Features
 
 - Homepage hero, CTAs, service cards, trust badges and feature sections
-- Hosting plans with prices, features, WHMCS checkout URLs and highlighted badges
+- Hosting plans with prices, features, WHMCS product mapping and highlighted badges
 - £200 website development package
 - TLD display prices and domain URLs
 - About and legal pages

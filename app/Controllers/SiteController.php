@@ -38,7 +38,7 @@ final class SiteController extends Controller
                 ['WordPress Hosting', 'Fast WordPress-ready hosting with SSL, cPanel and one-click installs.', 'panel', '/wordpress-hosting'],
                 ['cPanel Hosting', 'Reliable business hosting with email, databases and simple management.', 'cloud', '/hosting'],
                 ['Reseller Hosting', 'Sell hosting under your own brand with WHMCS-ready order links.', 'globe', '/hosting#reseller-hosting'],
-                ['Domain Registration', 'Search and register domains through the connected WHMCS client area.', 'shield', '/domains'],
+                ['Domain Registration', 'Search and register domains through the main website checkout.', 'shield', '/domains'],
                 ['Website Development', 'Complete business websites delivered fast with hosting setup included.', 'code', '/website-development'],
                 ['Cloudflare CDN Setup', 'Performance and security tuning with Cloudflare CDN configuration.', 'bolt', '/contact'],
             ]),
@@ -133,7 +133,7 @@ final class SiteController extends Controller
             'faqs' => $faqs,
             'schemas' => [
                 $this->faqSchema($faqs),
-                $this->serviceSchema('Domain Registration', 'Domain search and registration powered by WHMCS checkout and live billing flows.'),
+                $this->serviceSchema('Domain Registration', 'Domain search and registration on the main website with WHMCS-backed billing.'),
             ],
             'breadcrumbs' => [
                 ['name' => 'Home', 'url' => url('/')],
@@ -190,7 +190,7 @@ final class SiteController extends Controller
             ], 502);
         }
 
-        $tlds = ['.com', '.net', '.org', '.co.uk', '.xyz', '.online'];
+        $tlds = $this->supportedTlds();
         $orderedTlds = array_values(array_unique(array_merge([$parsed['tld']], $tlds)));
         $currency = $this->currencyPrefix($pricing['currency'] ?? []);
         $hostingPid = $this->hostingPid();
@@ -210,6 +210,15 @@ final class SiteController extends Controller
                 ], 502);
             }
 
+            $domainCheckoutUrl = url('/checkout?' . http_build_query([
+                'type' => 'domain',
+                'domain' => $candidate,
+            ]));
+            $bundleCheckoutUrl = url('/checkout?' . http_build_query([
+                'type' => 'bundle',
+                'domain' => $candidate,
+            ]));
+
             $results[] = [
                 'domain' => $candidate,
                 'sld' => $parsed['sld'],
@@ -218,8 +227,10 @@ final class SiteController extends Controller
                 'price' => $this->whmcs->priceForTld($pricing['pricing'], $tld),
                 'currency' => $currency,
                 'type' => $candidate === $domain ? 'match' : 'alternative',
-                'domain_url' => $this->whmcs->domainSearchUrl($candidate),
-                'hosting_url' => $this->domainHostingUrl($parsed['sld'], $tld, $hostingPid),
+                'domain_url' => $domainCheckoutUrl,
+                'hosting_url' => $bundleCheckoutUrl,
+                'checkout_url' => $domainCheckoutUrl,
+                'bundle_checkout_url' => $bundleCheckoutUrl,
             ];
         }
 
@@ -235,6 +246,101 @@ final class SiteController extends Controller
             'hosting_pid' => $hostingPid,
             'results' => $results,
         ]);
+    }
+
+    public function checkout(array $errors = [], array $old = []): string
+    {
+        $query = [
+            'order_type' => $old['order_type'] ?? $_GET['type'] ?? 'bundle',
+            'domain' => $old['domain'] ?? $_GET['domain'] ?? '',
+            'hosting_plan' => $old['hosting_plan'] ?? $_GET['plan'] ?? '',
+            'billing_cycle' => $old['billing_cycle'] ?? '',
+        ];
+
+        $plans = $this->checkoutPlans();
+        if ($query['hosting_plan'] === '' && $plans) {
+            $highlighted = array_values(array_filter($plans, static fn (array $plan): bool => !empty($plan['is_highlighted'])));
+            $query['hosting_plan'] = ($highlighted[0] ?? $plans[0])['slug'];
+        }
+
+        $old = array_merge($query, $old);
+        unset($old['password']);
+
+        return $this->render('site/checkout', $this->baseData('checkout', [
+            'errors' => $errors,
+            'old' => $old,
+            'plans' => $plans,
+            'package' => $this->content->package(),
+            'checkoutConfig' => $this->whmcs->checkoutConfig(),
+            'breadcrumbs' => [
+                ['name' => 'Home', 'url' => url('/')],
+                ['name' => 'Checkout', 'url' => url('/checkout')],
+            ],
+            'metaOverride' => [
+                'title' => 'Checkout | Planetic Solutions',
+                'description' => 'Order domains, hosting and website development through the Planetic Solutions website with WHMCS-backed billing.',
+            ],
+        ]));
+    }
+
+    public function submitCheckout(): string
+    {
+        if (!Csrf::verify($_POST['_csrf'] ?? null)) {
+            return $this->checkout(['Your security token expired. Please submit the form again.'], $_POST);
+        }
+
+        [$data, $errors] = $this->validateCheckout($_POST);
+        if ($errors) {
+            return $this->checkout($errors, $data);
+        }
+
+        if ($this->orderRegistersDomain($data['order_type'])) {
+            $availability = $this->whmcs->checkDomain($data['domain']);
+            if (!$availability['ok']) {
+                return $this->checkout(['Unable to check domain availability with WHMCS. Please try again.'], $data);
+            }
+
+            if (!$availability['available']) {
+                return $this->checkout(['That domain is no longer available. Please search another domain.'], $data);
+            }
+        }
+
+        $client = $this->whmcs->createOrFindClient([
+            'firstname' => $data['first_name'],
+            'lastname' => $data['last_name'],
+            'email' => $data['email'],
+            'address1' => $data['address'],
+            'city' => $data['city'],
+            'state' => $data['state'],
+            'postcode' => $data['postcode'],
+            'country' => $data['country'],
+            'phonenumber' => $data['phone'],
+            'password2' => $data['password'],
+            'clientip' => $_SERVER['REMOTE_ADDR'] ?? '',
+        ]);
+
+        if (!$client['ok']) {
+            return $this->checkout([$client['message'] ?? 'Unable to create or find the WHMCS client.'], $data);
+        }
+
+        $orderPayload = $this->buildWhmcsOrderPayload($data);
+        if (!$orderPayload['ok']) {
+            return $this->checkout([$orderPayload['message']], $data);
+        }
+
+        $order = $this->whmcs->addOrder(array_merge([
+            'clientid' => (int) $client['client_id'],
+        ], $orderPayload['payload']));
+
+        if (!$order['ok']) {
+            return $this->checkout([$order['message'] ?? 'Unable to create the WHMCS order.'], $data);
+        }
+
+        if (!empty($order['invoice_id'])) {
+            $this->redirect($this->whmcs->invoiceUrl((int) $order['invoice_id']));
+        }
+
+        return $this->checkout(['Order created, but WHMCS did not return an invoice ID. Please contact support.'], $data);
     }
 
     public function about(): string
@@ -472,6 +578,201 @@ final class SiteController extends Controller
         return $rows ?: $fallback;
     }
 
+    private function checkoutPlans(): array
+    {
+        $config = $this->whmcs->checkoutConfig();
+        $configuredProducts = $config['hosting_products'] ?? [];
+
+        return array_map(function (array $plan) use ($configuredProducts, $config): array {
+            $slug = (string) $plan['slug'];
+            $configured = $configuredProducts[$slug] ?? [];
+            $pid = (int) ($configured['pid'] ?? 0);
+            if ($pid <= 0) {
+                $pid = $this->pidFromUrl((string) ($plan['whmcs_url'] ?? ''));
+            }
+
+            $plan['checkout_pid'] = $pid;
+            $plan['checkout_billing_cycle'] = (string) ($configured['billing_cycle'] ?? $config['default_billing_cycle'] ?? 'monthly');
+            return $plan;
+        }, $this->content->hostingPlans(null, true));
+    }
+
+    private function checkoutPlanBySlug(string $slug): ?array
+    {
+        foreach ($this->checkoutPlans() as $plan) {
+            if ($plan['slug'] === $slug) {
+                return $plan;
+            }
+        }
+
+        return null;
+    }
+
+    private function validateCheckout(array $input): array
+    {
+        $data = [
+            'order_type' => trim((string) ($input['order_type'] ?? '')),
+            'domain' => $this->normaliseDomain((string) ($input['domain'] ?? '')),
+            'hosting_plan' => trim((string) ($input['hosting_plan'] ?? '')),
+            'billing_cycle' => trim((string) ($input['billing_cycle'] ?? '')),
+            'first_name' => trim((string) ($input['first_name'] ?? '')),
+            'last_name' => trim((string) ($input['last_name'] ?? '')),
+            'email' => trim((string) ($input['email'] ?? '')),
+            'phone' => trim((string) ($input['phone'] ?? '')),
+            'address' => trim((string) ($input['address'] ?? '')),
+            'city' => trim((string) ($input['city'] ?? '')),
+            'state' => trim((string) ($input['state'] ?? '')),
+            'postcode' => trim((string) ($input['postcode'] ?? '')),
+            'country' => strtoupper(trim((string) ($input['country'] ?? 'GB'))),
+            'password' => (string) ($input['password'] ?? ''),
+        ];
+
+        $errors = [];
+        if (!in_array($data['order_type'], ['domain', 'hosting', 'bundle', 'website'], true)) {
+            $errors[] = 'Choose a valid order type.';
+        }
+
+        if ($data['domain'] === '' || !preg_match('/^[a-z0-9][a-z0-9.-]+\.[a-z.]{2,}$/', $data['domain'])) {
+            $errors[] = 'Enter a valid domain name.';
+        }
+
+        if ($this->orderRegistersDomain($data['order_type']) && !$this->splitDomain($data['domain'])) {
+            $errors[] = 'Choose a supported domain extension.';
+        }
+
+        if (in_array($data['order_type'], ['hosting', 'bundle'], true)) {
+            $plan = $this->checkoutPlanBySlug($data['hosting_plan']);
+            if (!$plan || (int) ($plan['checkout_pid'] ?? 0) <= 0) {
+                $errors[] = 'Choose a valid hosting package.';
+            }
+        }
+
+        foreach (['first_name' => 'First name', 'last_name' => 'Last name', 'phone' => 'Phone', 'address' => 'Address', 'city' => 'City', 'state' => 'State', 'postcode' => 'Postcode'] as $key => $label) {
+            if ($data[$key] === '') {
+                $errors[] = $label . ' is required.';
+            }
+        }
+
+        if (!filter_var($data['email'], FILTER_VALIDATE_EMAIL)) {
+            $errors[] = 'A valid email address is required.';
+        }
+
+        if (!preg_match('/^[A-Z]{2}$/', $data['country'])) {
+            $errors[] = 'Country must be a two-letter ISO code, for example GB.';
+        }
+
+        if (strlen($data['password']) < 8) {
+            $errors[] = 'Password must be at least 8 characters.';
+        }
+
+        return [$data, $errors];
+    }
+
+    private function buildWhmcsOrderPayload(array $data): array
+    {
+        $config = $this->whmcs->checkoutConfig();
+        $payload = [];
+        $domain = $data['domain'];
+        $registrationPeriod = $this->domainRegistrationPeriod($domain);
+
+        if ($data['order_type'] === 'domain') {
+            $payload['domain'] = [$domain];
+            $payload['domaintype'] = ['register'];
+            $payload['regperiod'] = [$registrationPeriod];
+            return ['ok' => true, 'payload' => $this->appendNameservers($payload)];
+        }
+
+        if (in_array($data['order_type'], ['hosting', 'bundle'], true)) {
+            $plan = $this->checkoutPlanBySlug($data['hosting_plan']);
+            $pid = (int) ($plan['checkout_pid'] ?? 0);
+            if ($pid <= 0) {
+                return ['ok' => false, 'message' => 'Hosting product ID is not configured.'];
+            }
+
+            $payload['pid'] = [$pid];
+            $payload['domain'] = [$domain];
+            $payload['billingcycle'] = [$data['billing_cycle'] ?: ($plan['checkout_billing_cycle'] ?? 'monthly')];
+
+            if ($data['order_type'] === 'bundle') {
+                $payload['domaintype'] = ['register'];
+                $payload['regperiod'] = [$registrationPeriod];
+            }
+
+            return ['ok' => true, 'payload' => $this->appendNameservers($payload)];
+        }
+
+        $website = $config['website_package'] ?? [];
+        $pid = (int) ($website['pid'] ?? 0);
+        if ($pid <= 0) {
+            return ['ok' => false, 'message' => 'Website package product ID is not configured.'];
+        }
+
+        $payload['pid'] = [$pid];
+        $payload['domain'] = [$domain];
+        $cycle = (string) ($website['billing_cycle'] ?? '');
+        if ($cycle !== '' && $cycle !== 'onetime') {
+            $payload['billingcycle'] = [$cycle];
+        }
+
+        if (!empty($website['register_domain'])) {
+            $payload['domaintype'] = ['register'];
+            $payload['regperiod'] = [$registrationPeriod];
+            if (array_key_exists('domain_price_override', $website)) {
+                $payload['domainpriceoverride'] = [(string) $website['domain_price_override']];
+            }
+        }
+
+        return ['ok' => true, 'payload' => $this->appendNameservers($payload)];
+    }
+
+    private function orderRegistersDomain(string $type): bool
+    {
+        if (in_array($type, ['domain', 'bundle'], true)) {
+            return true;
+        }
+
+        if ($type !== 'website') {
+            return false;
+        }
+
+        return !empty($this->whmcs->checkoutConfig()['website_package']['register_domain']);
+    }
+
+    private function appendNameservers(array $payload): array
+    {
+        $nameservers = $this->whmcs->checkoutConfig()['nameservers'] ?? [];
+        foreach (array_slice($nameservers, 0, 5) as $index => $nameserver) {
+            $payload['nameserver' . ($index + 1)] = $nameserver;
+        }
+
+        return $payload;
+    }
+
+    private function pidFromUrl(string $url): int
+    {
+        $query = parse_url($url, PHP_URL_QUERY);
+        if (!$query) {
+            return 0;
+        }
+
+        parse_str($query, $params);
+        return (int) ($params['pid'] ?? 0);
+    }
+
+    private function supportedTlds(): array
+    {
+        $pricing = $this->whmcs->checkoutConfig()['domain_pricing'] ?? [];
+        $tlds = array_keys($pricing);
+        return $tlds ?: ['.co.uk', '.online', '.com', '.net', '.org', '.xyz'];
+    }
+
+    private function domainRegistrationPeriod(string $domain): int
+    {
+        $parsed = $this->splitDomain($domain);
+        $pricing = $this->whmcs->checkoutConfig()['domain_pricing'] ?? [];
+        return max(1, (int) ($pricing[$parsed['tld'] ?? '']['regperiod'] ?? 1));
+    }
+
     private function normaliseDomain(string $domain): string
     {
         $domain = strtolower(trim($domain));
@@ -483,7 +784,8 @@ final class SiteController extends Controller
 
     private function splitDomain(string $domain): ?array
     {
-        $supported = ['.co.uk', '.online', '.com', '.net', '.org', '.xyz'];
+        $supported = $this->supportedTlds();
+        usort($supported, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
         foreach ($supported as $tld) {
             if (!str_ends_with($domain, $tld)) {
                 continue;
@@ -519,17 +821,6 @@ final class SiteController extends Controller
 
         $configuredPid = trim((string) ($this->settings['domain_hosting_pid'] ?? ''));
         return $configuredPid !== '' ? $configuredPid : env('DOMAIN_HOSTING_PID', 'HOSTING_PID_HERE');
-    }
-
-    private function domainHostingUrl(string $sld, string $tld, string $pid): string
-    {
-        return $this->whmcs->cartUrl('cart.php?' . http_build_query([
-            'a' => 'add',
-            'pid' => $pid,
-            'domainoption' => 'register',
-            'sld' => $sld,
-            'tld' => $tld,
-        ]));
     }
 
     private function currencyPrefix(array $currency): string
@@ -600,7 +891,7 @@ final class SiteController extends Controller
                         '@type' => 'Offer',
                         'priceCurrency' => 'GBP',
                         'price' => preg_replace('/[^0-9.]/', '', (string) $plan['monthly_price']),
-                        'url' => $plan['whmcs_url'],
+                        'url' => url('/checkout?' . http_build_query(['type' => 'hosting', 'plan' => $plan['slug']])),
                     ],
                 ],
             ], $plans, array_keys($plans)),

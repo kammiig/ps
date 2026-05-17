@@ -3,7 +3,7 @@
         <div>
             <span class="section-kicker">Domain registration</span>
             <h1>Search and Register Domains Through WHMCS</h1>
-            <p>Use the domain search below to check availability on this website, then continue securely to WHMCS checkout for registration and billing.</p>
+            <p>Use the domain search below to check availability on this website, then continue through our main-site checkout while WHMCS handles billing and domain records behind the scenes.</p>
             <?php $id = 'domain-page-search'; require APP_PATH . '/Views/partials/domain-search.php'; ?>
         </div>
         <aside class="page-hero-card">
@@ -22,7 +22,7 @@
         <div class="section-head">
             <div>
                 <span class="section-kicker">Popular extensions</span>
-                <h2>Manual display prices with WHMCS checkout links</h2>
+                <h2>Display prices with WHMCS-backed checkout</h2>
             </div>
         </div>
         <div class="tld-grid">
@@ -31,7 +31,7 @@
                     <h3><?= e($tld['extension']) ?></h3>
                     <strong><?= e($tld['price']) ?></strong>
                     <p>Registration prices are confirmed at checkout using WHMCS rates.</p>
-                    <a class="btn btn-outline" href="<?= e($tld['whmcs_url'] ?: $whmcs->domainSearchUrl()) ?>">Search <?= e($tld['extension']) ?></a>
+                    <a class="btn btn-outline" href="<?= e(url('/domain-search')) ?>">Search <?= e($tld['extension']) ?></a>
                 </article>
             <?php endforeach; ?>
         </div>

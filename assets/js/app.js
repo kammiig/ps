@@ -87,14 +87,14 @@ function renderExactDomainCard(item) {
     const price = formatDomainPrice(item);
     const badge = item.available ? '<span class="result-badge">Match</span>' : '<span class="result-badge muted">Taken</span>';
     const button = item.available
-        ? `<a class="btn btn-primary" href="${escapeAttr(item.domain_url)}">Get domain</a>`
+        ? `<a class="btn btn-primary" href="${escapeAttr(item.checkout_url || item.domain_url)}">Get domain</a>`
         : '<button class="btn btn-light" type="button" disabled>Unavailable</button>';
 
     return `
         <article class="domain-result-card exact-card">
             <div class="card-topline">${badge}<span>${escapeHtml(item.tld)}</span></div>
             <h3>${escapeHtml(item.domain)}</h3>
-            <p>${item.available ? 'Exact match domain ready for registration through WHMCS checkout.' : 'This exact domain is already registered.'}</p>
+            <p>${item.available ? 'Exact match domain ready for main-site checkout and WHMCS-backed billing.' : 'This exact domain is already registered.'}</p>
             <div class="domain-price">${price}<small>/yr</small></div>
             ${button}
         </article>
@@ -105,7 +105,7 @@ function renderHostingBundleCard(item, hostingPid) {
     const disabled = !item.available || !hostingPid || hostingPid === 'HOSTING_PID_HERE';
     const button = disabled
         ? '<button class="btn btn-light" type="button" disabled>Hosting bundle unavailable</button>'
-        : `<a class="btn btn-primary" href="${escapeAttr(item.hosting_url)}">Get domain + hosting</a>`;
+        : `<a class="btn btn-primary" href="${escapeAttr(item.bundle_checkout_url || item.hosting_url)}">Get domain + hosting</a>`;
 
     return `
         <article class="domain-result-card bundle-card">
@@ -126,7 +126,7 @@ function renderAlternativeRow(item) {
     const price = formatDomainPrice(item);
     const status = item.available ? '<span class="availability-pill">Available</span>' : '<span class="availability-pill taken">Taken</span>';
     const action = item.available
-        ? `<a class="btn btn-outline" href="${escapeAttr(item.domain_url)}">Get domain</a>`
+        ? `<a class="btn btn-outline" href="${escapeAttr(item.checkout_url || item.domain_url)}">Get domain</a>`
         : '<button class="btn btn-light" type="button" disabled>Unavailable</button>';
 
     return `

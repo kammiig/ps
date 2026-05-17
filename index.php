@@ -18,6 +18,8 @@ $router->get('/domains', [SiteController::class, 'domains']);
 $router->get('/domain-search', [SiteController::class, 'domainSearchPage']);
 $router->post('/domain-search', [SiteController::class, 'domainSearch']);
 $router->get('/api/domain-search', [SiteController::class, 'apiDomainSearch']);
+$router->get('/checkout', [SiteController::class, 'checkout']);
+$router->post('/checkout', [SiteController::class, 'submitCheckout']);
 $router->get('/about', [SiteController::class, 'about']);
 $router->get('/contact', [SiteController::class, 'contact']);
 $router->post('/contact', [SiteController::class, 'submitContact']);

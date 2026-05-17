@@ -11,8 +11,8 @@
         </div>
         <aside class="page-hero-card">
             <span class="mini-label">Sales and support</span>
-            <strong>WHMCS-connected ordering</strong>
-            <p>Use the form for website packages or service questions, and WHMCS for billing.</p>
+            <strong>Main-site ordering</strong>
+            <p>Order on this website, then use WHMCS for invoices, renewals and service management.</p>
         </aside>
     </div>
 </section>
@@ -41,7 +41,7 @@
         </form>
         <aside class="contact-panel">
             <h2>Support and sales</h2>
-            <p>Hosting orders, domain registration and billing are completed through the WHMCS client area. Website package inquiries can also be handled here.</p>
+            <p>Hosting orders, domain registration and website package orders now start on the main website. WHMCS remains available for invoices, services, support tickets and renewals.</p>
             <?php if (!empty($settings['admin_email'])): ?><a href="mailto:<?= e($settings['admin_email']) ?>"><?= icon('mail') ?> <?= e($settings['admin_email']) ?></a><?php endif; ?>
             <?php if (!empty($settings['phone'])): ?><a href="tel:<?= e(preg_replace('/\s+/', '', $settings['phone'])) ?>"><?= icon('phone') ?> <?= e($settings['phone']) ?></a><?php endif; ?>
             <a href="<?= e($whmcs->clientAreaUrl()) ?>"><?= icon('panel') ?> WHMCS Client Area</a>

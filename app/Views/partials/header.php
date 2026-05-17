@@ -1,6 +1,6 @@
 <?php
 $clientArea = $whmcs->clientAreaUrl();
-$getStarted = $settings['default_order_url'] ?: $whmcs->cartUrl();
+$getStarted = url('/checkout');
 $logo = upload_url($settings['logo_url'] ?? '');
 ?>
 <a class="skip-link" href="#main-content">Skip to content</a>

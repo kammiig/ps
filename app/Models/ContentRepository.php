@@ -33,6 +33,7 @@ final class ContentRepository
         $settings['app_url'] ??= env('APP_URL', '');
         $settings['whmcs_client_area_url'] ??= env('WHMCS_URL', env('WHMCS_CLIENT_AREA_URL', 'https://planeticsolution.com/clientarea/'));
         $settings['domain_hosting_pid'] ??= env('DOMAIN_HOSTING_PID', '');
+        $settings['whmcs_payment_method'] ??= env('WHMCS_PAYMENT_METHOD', 'stripe');
         $settings['admin_email'] ??= env('ADMIN_EMAIL', '');
         $settings['mail_from'] ??= env('MAIL_FROM', '');
 
@@ -407,6 +408,7 @@ final class ContentRepository
             ['loc' => '/wordpress-hosting', 'changefreq' => 'monthly', 'priority' => '0.8'],
             ['loc' => '/website-development', 'changefreq' => 'weekly', 'priority' => '0.9'],
             ['loc' => '/domains', 'changefreq' => 'weekly', 'priority' => '0.8'],
+            ['loc' => '/checkout', 'changefreq' => 'weekly', 'priority' => '0.7'],
             ['loc' => '/about', 'changefreq' => 'monthly', 'priority' => '0.6'],
             ['loc' => '/contact', 'changefreq' => 'monthly', 'priority' => '0.7'],
             ['loc' => '/blog', 'changefreq' => 'weekly', 'priority' => '0.7'],

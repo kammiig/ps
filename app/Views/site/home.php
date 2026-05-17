@@ -7,7 +7,7 @@ $secondaryText = $settings['home_secondary_cta_text'] ?? 'View Hosting Plans';
 $secondaryUrl = $settings['home_secondary_cta_url'] ?? url('/hosting');
 $websiteText = $settings['home_website_cta_text'] ?? 'Get Website for £200';
 $websiteUrl = $settings['home_website_cta_url'] ?? url('/website-development');
-$packageOrderUrl = !empty($package['inquiry_mode']) ? url('/contact') : (($package['cta_url'] ?? '') ?: url('/website-development'));
+$packageOrderUrl = url('/checkout?type=website');
 $websiteChecklist = [
     'Professional business website',
     'Free hosting setup',
@@ -210,7 +210,7 @@ $websiteChecklist = [
 $title = 'Ready to launch your website?';
 $text = 'Start with hosting, search your domain, or order a complete business website package through a clean WHMCS-connected flow.';
 $primaryText = 'Get Started';
-$primaryUrl = $settings['default_order_url'] ?: $whmcs->cartUrl();
+$primaryUrl = url('/checkout');
 $secondaryText = 'Search Domain';
 $secondaryUrl = '#domain-search';
 ?>

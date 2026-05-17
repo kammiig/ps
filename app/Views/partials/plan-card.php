@@ -1,6 +1,9 @@
 <?php
 $features = json_decode($plan['features_json'] ?? '[]', true) ?: [];
-$orderUrl = $plan['whmcs_url'] ?: $whmcs->cartUrl();
+$orderUrl = url('/checkout?' . http_build_query([
+    'type' => 'hosting',
+    'plan' => $plan['slug'],
+]));
 ?>
 <article class="pricing-card <?= !empty($plan['is_highlighted']) ? 'is-featured' : '' ?>">
     <?php if (!empty($plan['badge'])): ?><span class="badge"><?= e($plan['badge']) ?></span><?php endif; ?>
