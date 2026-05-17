@@ -146,15 +146,29 @@ final class WhmcsService
         ], false);
 
         if (($decoded['result'] ?? '') !== 'success') {
-            return ['ok' => false, 'found' => false, 'message' => $decoded['message'] ?? 'Client not found.'];
+            $message = (string) ($decoded['message'] ?? 'Client not found.');
+            return [
+                'ok' => false,
+                'found' => false,
+                'not_found' => str_contains(strtolower($message), 'not found'),
+                'message' => $message,
+            ];
         }
 
         $client = $decoded['client'] ?? $decoded;
         $clientId = (int) ($client['client_id'] ?? $client['userid'] ?? $client['id'] ?? 0);
+        if ($clientId <= 0) {
+            return [
+                'ok' => false,
+                'found' => false,
+                'not_found' => true,
+                'message' => 'Client not found.',
+            ];
+        }
 
         return [
-            'ok' => $clientId > 0,
-            'found' => $clientId > 0,
+            'ok' => true,
+            'found' => true,
             'client_id' => $clientId,
             'client' => $client,
         ];
@@ -197,6 +211,13 @@ final class WhmcsService
                 'ok' => true,
                 'client_id' => (int) $existing['client_id'],
                 'created' => false,
+            ];
+        }
+
+        if (!$existing['ok'] && empty($existing['not_found'])) {
+            return [
+                'ok' => false,
+                'message' => $existing['message'] ?? 'Unable to check existing WHMCS client.',
             ];
         }
 
@@ -286,47 +307,167 @@ final class WhmcsService
         $apiUrl = $this->apiUrl();
         $identifier = trim((string) ($this->settings['whmcs_api_identifier'] ?? ''));
         $secret = trim((string) ($this->settings['whmcs_api_secret'] ?? ''));
+        $accessKey = trim((string) ($this->settings['whmcs_api_access_key'] ?? ''));
         $identifier = $identifier !== '' ? $identifier : (string) ($this->config['api_identifier'] ?? env('WHMCS_API_IDENTIFIER', ''));
         $secret = $secret !== '' ? $secret : (string) ($this->config['api_secret'] ?? env('WHMCS_API_SECRET', ''));
+        $accessKey = $accessKey !== '' ? $accessKey : (string) ($this->config['api_access_key'] ?? env('WHMCS_API_ACCESS_KEY', ''));
 
         if (!$apiUrl || !$identifier || !$secret) {
             return ['result' => 'error', 'message' => 'WHMCS API credentials are not configured.'];
         }
 
-        $payload = http_build_query(array_merge($params, [
+        $auth = [
             'identifier' => $identifier,
             'secret' => $secret,
-        ]));
-
-        $context = stream_context_create([
-            'http' => [
-                'method' => 'POST',
-                'header' => "Content-Type: application/x-www-form-urlencoded\r\n",
-                'content' => $payload,
-                'timeout' => 12,
-            ],
-        ]);
-
-        $response = @file_get_contents($apiUrl, false, $context);
-        if (!$response) {
-            $this->logError('WHMCS API did not respond.', ['action' => $params['action'] ?? 'unknown']);
-            return ['result' => 'error', 'message' => 'WHMCS API did not respond.'];
+        ];
+        if ($accessKey !== '') {
+            $auth['accesskey'] = $accessKey;
         }
 
+        $action = (string) ($params['action'] ?? 'unknown');
+        $payload = http_build_query(array_merge($params, $auth));
+        $transport = $this->postApiRequest($apiUrl, $payload, $action);
+
+        if (!$transport['ok']) {
+            $this->logError('WHMCS API did not respond.', [
+                'action' => $action,
+                'transport' => $transport['transport'] ?? 'unknown',
+                'http_status' => $transport['http_status'] ?? 0,
+                'diagnostic' => $transport['diagnostic'] ?? '',
+            ]);
+
+            return [
+                'result' => 'error',
+                'message' => 'WHMCS API did not respond. Check the API URL, credentials, WHMCS API IP access settings and cPanel outbound HTTPS/cURL support.',
+            ];
+        }
+
+        $response = (string) ($transport['body'] ?? '');
         $decoded = json_decode($response, true);
         if (!is_array($decoded)) {
-            $this->logError('WHMCS returned invalid JSON.', ['action' => $params['action'] ?? 'unknown']);
-            return ['result' => 'error', 'message' => 'WHMCS returned invalid JSON.'];
+            $this->logError('WHMCS returned invalid JSON.', [
+                'action' => $action,
+                'transport' => $transport['transport'] ?? 'unknown',
+                'http_status' => $transport['http_status'] ?? 0,
+                'response_preview' => substr(strip_tags($response), 0, 220),
+            ]);
+            return ['result' => 'error', 'message' => 'WHMCS returned invalid JSON. Check the API URL and WHMCS error output.'];
         }
 
         if ($logErrors && ($decoded['result'] ?? '') !== 'success') {
             $this->logError('WHMCS API error.', [
-                'action' => $params['action'] ?? 'unknown',
+                'action' => $action,
                 'message' => $decoded['message'] ?? 'Unknown WHMCS error.',
             ]);
         }
 
         return $decoded;
+    }
+
+    private function postApiRequest(string $apiUrl, string $payload, string $action): array
+    {
+        $verifySsl = $this->sslVerify();
+        $curlFailure = [];
+        if (function_exists('curl_init')) {
+            $curl = curl_init($apiUrl);
+            curl_setopt_array($curl, [
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => $payload,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_CONNECTTIMEOUT => 10,
+                CURLOPT_TIMEOUT => 20,
+                CURLOPT_HTTPHEADER => ['Content-Type: application/x-www-form-urlencoded'],
+                CURLOPT_USERAGENT => 'PlaneticSolutionsWebsite/1.0',
+                CURLOPT_SSL_VERIFYPEER => $verifySsl,
+                CURLOPT_SSL_VERIFYHOST => $verifySsl ? 2 : 0,
+            ]);
+
+            $body = curl_exec($curl);
+            $error = curl_error($curl);
+            $errno = curl_errno($curl);
+            $status = (int) curl_getinfo($curl, CURLINFO_HTTP_CODE);
+            curl_close($curl);
+
+            if ($body !== false && $body !== '') {
+                return [
+                    'ok' => true,
+                    'body' => (string) $body,
+                    'http_status' => $status,
+                    'transport' => 'curl',
+                ];
+            }
+
+            $curlFailure = [
+                'action' => $action,
+                'http_status' => $status,
+                'curl_errno' => $errno,
+                'curl_error' => $error,
+            ];
+            $this->logError('WHMCS API cURL transport failed.', $curlFailure);
+
+            if (!$this->canRetryApiAction($action)) {
+                return [
+                    'ok' => false,
+                    'transport' => 'curl',
+                    'http_status' => $status,
+                    'diagnostic' => $error,
+                ];
+            }
+        }
+
+        $context = stream_context_create([
+            'http' => [
+                'method' => 'POST',
+                'header' => "Content-Type: application/x-www-form-urlencoded\r\nUser-Agent: PlaneticSolutionsWebsite/1.0\r\n",
+                'content' => $payload,
+                'timeout' => 20,
+                'ignore_errors' => true,
+            ],
+            'ssl' => [
+                'verify_peer' => $verifySsl,
+                'verify_peer_name' => $verifySsl,
+            ],
+        ]);
+
+        $body = @file_get_contents($apiUrl, false, $context);
+        if ($body !== false && $body !== '') {
+            return [
+                'ok' => true,
+                'body' => (string) $body,
+                'http_status' => $this->streamHttpStatus($http_response_header ?? []),
+                'transport' => 'stream',
+            ];
+        }
+
+        $error = error_get_last();
+        return [
+            'ok' => false,
+            'transport' => function_exists('curl_init') ? 'curl+stream' : 'stream',
+            'http_status' => $this->streamHttpStatus($http_response_header ?? []),
+            'diagnostic' => is_array($error) ? (string) ($error['message'] ?? '') : (string) ($curlFailure['curl_error'] ?? ''),
+        ];
+    }
+
+    private function canRetryApiAction(string $action): bool
+    {
+        return in_array($action, ['DomainWhois', 'GetTLDPricing', 'GetProducts', 'GetClientsDetails'], true);
+    }
+
+    private function streamHttpStatus(array $headers): int
+    {
+        foreach ($headers as $header) {
+            if (preg_match('#^HTTP/\S+\s+(\d{3})#', (string) $header, $matches)) {
+                return (int) $matches[1];
+            }
+        }
+
+        return 0;
+    }
+
+    private function sslVerify(): bool
+    {
+        $value = $this->config['api_ssl_verify'] ?? env('WHMCS_API_SSL_VERIFY', true);
+        return filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? true;
     }
 
     private function apiUrl(): string

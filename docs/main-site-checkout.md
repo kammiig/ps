@@ -39,6 +39,11 @@ POST /checkout
 Set product IDs in `.env`:
 
 ```env
+WHMCS_API_URL=https://planeticsolution.com/clientarea/includes/api.php
+WHMCS_API_IDENTIFIER=your_identifier
+WHMCS_API_SECRET=your_secret
+WHMCS_API_ACCESS_KEY=
+WHMCS_API_SSL_VERIFY=true
 WHMCS_PAYMENT_METHOD=stripe
 WHMCS_STARTER_HOSTING_PID=1
 WHMCS_BUSINESS_HOSTING_PID=2
@@ -68,11 +73,14 @@ Checkout does not trust frontend prices. WHMCS creates the actual invoice and pr
 
 1. Create WHMCS API credentials in WHMCS Admin > System Settings > API Credentials.
 2. Add the credentials to `.env`.
-3. Confirm `WHMCS_PAYMENT_METHOD` matches a payment gateway system name enabled in WHMCS.
-4. Map all hosting and website product IDs.
-5. Configure domain registrar/TLD pricing in WHMCS.
-6. Upload the site to cPanel and keep `.env`, `app/`, `database/` and `storage/` protected by `.htaccess`.
-7. Test the flow with a low-value test product or sandbox payment gateway first.
+3. If WHMCS API IP access control uses an access key, add it as `WHMCS_API_ACCESS_KEY`.
+4. Confirm `WHMCS_PAYMENT_METHOD` matches a payment gateway system name enabled in WHMCS.
+5. Map all hosting and website product IDs.
+6. Configure domain registrar/TLD pricing in WHMCS.
+7. Upload the site to cPanel and keep `.env`, `app/`, `database/` and `storage/` protected by `.htaccess`.
+8. Test the flow with a low-value test product or sandbox payment gateway first.
+
+If domain search or checkout says WHMCS is not responding, check `storage/logs/whmcs-api.log`. The website calls WHMCS server-side using cURL first, then a PHP stream fallback. Most failures are caused by missing API credentials, WHMCS API IP restrictions, an incorrect `WHMCS_API_URL`, or cPanel outbound HTTPS/SSL issues.
 
 ## WordPress Shortcodes
 

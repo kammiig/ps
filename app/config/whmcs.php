@@ -7,6 +7,8 @@ return [
     'client_area_url' => env('WHMCS_URL', env('WHMCS_CLIENT_AREA_URL', 'https://planeticsolution.com/clientarea')),
     'api_identifier' => env('WHMCS_API_IDENTIFIER', ''),
     'api_secret' => env('WHMCS_API_SECRET', ''),
+    'api_access_key' => env('WHMCS_API_ACCESS_KEY', ''),
+    'api_ssl_verify' => filter_var(env('WHMCS_API_SSL_VERIFY', true), FILTER_VALIDATE_BOOLEAN),
     'payment_method' => env('WHMCS_PAYMENT_METHOD', 'stripe'),
     'currency_id' => (int) env('WHMCS_CURRENCY_ID', 1),
     'default_billing_cycle' => env('WHMCS_DEFAULT_BILLING_CYCLE', 'monthly'),

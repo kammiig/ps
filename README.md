@@ -54,8 +54,11 @@ The `.env` file should include:
 
 ```env
 WHMCS_URL=https://planeticsolution.com/clientarea
+WHMCS_API_URL=https://planeticsolution.com/clientarea/includes/api.php
 WHMCS_API_IDENTIFIER=your_identifier
 WHMCS_API_SECRET=your_secret
+WHMCS_API_ACCESS_KEY=
+WHMCS_API_SSL_VERIFY=true
 WHMCS_PAYMENT_METHOD=stripe
 WHMCS_STARTER_HOSTING_PID=1
 WHMCS_BUSINESS_HOSTING_PID=2
@@ -73,6 +76,8 @@ The results page calls the backend-only endpoint:
 `/api/domain-search?domain=searched-domain`
 
 That endpoint validates the domain server-side, calls WHMCS `DomainWhois`, fetches live WHMCS prices with `GetTLDPricing`, and returns safe JSON for the frontend. WHMCS API credentials are never exposed in browser JavaScript.
+
+If WHMCS has API IP access restrictions enabled with an access key, set `WHMCS_API_ACCESS_KEY` in `.env`. The integration uses cURL when available and logs safe diagnostics to `storage/logs/whmcs-api.log` if cPanel cannot reach WHMCS.
 
 Domain-only, hosting-only, domain + hosting and website package buttons now send visitors to:
 

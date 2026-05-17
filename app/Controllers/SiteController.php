@@ -190,7 +190,7 @@ final class SiteController extends Controller
         $currency = $pricingOk ? $this->currencyPrefix($pricing['currency'] ?? []) : '£';
         $hostingPid = $this->hostingPid();
         $results = [];
-        $availabilityChecked = true;
+        $availabilityErrors = [];
 
         foreach ($orderedTlds as $tld) {
             if (!in_array($tld, $tlds, true)) {
@@ -198,9 +198,15 @@ final class SiteController extends Controller
             }
 
             $candidate = $parsed['sld'] . $tld;
-            $availability = $availabilityChecked ? $this->whmcs->checkDomain($candidate) : ['ok' => false];
+            $availability = $this->whmcs->checkDomain($candidate);
             if (!$availability['ok']) {
-                $availabilityChecked = false;
+                $availabilityErrors[] = $candidate . ': ' . ($availability['message'] ?? 'WHMCS availability check failed.');
+                if ($candidate === $domain) {
+                    return $this->json([
+                        'ok' => false,
+                        'message' => 'Live WHMCS domain availability could not be checked. Please verify WHMCS API credentials, API IP access and cPanel cURL/SSL support.',
+                    ], 502);
+                }
             }
 
             $domainCheckoutUrl = url('/checkout?' . http_build_query([
@@ -234,9 +240,9 @@ final class SiteController extends Controller
             'searched' => $domain,
             'sld' => $parsed['sld'],
             'tld' => $parsed['tld'],
-            'available' => $availabilityChecked ? (bool) ($match['available'] ?? false) : null,
-            'availability_checked' => $availabilityChecked,
-            'message' => $availabilityChecked ? null : 'Live WHMCS availability is temporarily unavailable. WHMCS will validate the domain during checkout.',
+            'available' => (bool) ($match['available'] ?? false),
+            'availability_checked' => true,
+            'message' => $availabilityErrors ? 'Some alternative TLDs could not be checked and have been disabled.' : null,
             'currency' => $currency,
             'hosting_pid' => $hostingPid,
             'results' => $results,
@@ -291,7 +297,13 @@ final class SiteController extends Controller
 
         if ($this->orderRegistersDomain($data['order_type'])) {
             $availability = $this->whmcs->checkDomain($data['domain']);
-            if ($availability['ok'] && !$availability['available']) {
+            if (!$availability['ok']) {
+                return $this->checkout([
+                    'Live WHMCS domain availability could not be checked. Please verify the WHMCS API connection before registering domains.',
+                ], $data);
+            }
+
+            if (!$availability['available']) {
                 return $this->checkout(['That domain is no longer available. Please search another domain.'], $data);
             }
         }

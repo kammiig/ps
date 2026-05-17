@@ -130,16 +130,16 @@ function renderDomainResults(root, data) {
     const match = results.find((item) => item.type === 'match') || results[0];
     const alternatives = results.filter((item) => item.domain !== match.domain);
     const availabilityChecked = data.availability_checked !== false;
-    const available = match.available !== false;
+    const available = availabilityChecked && match.available === true;
     const headline = !availabilityChecked
-        ? `Continue with ${escapeHtml(data.searched)}`
-        : data.available
+        ? `Live check unavailable for ${escapeHtml(data.searched)}`
+        : available
         ? `${escapeHtml(data.searched)} is available!`
         : `${escapeHtml(data.searched)} is unavailable`;
-    const badgeText = !availabilityChecked ? 'Check at checkout' : (data.available ? 'Available' : 'Taken');
+    const badgeText = !availabilityChecked ? 'Check unavailable' : (available ? 'Available' : 'Taken');
     const messageText = !availabilityChecked
-        ? 'Live WHMCS availability is temporarily unavailable. You can continue and WHMCS will validate the domain during checkout.'
-        : data.available
+        ? 'Live WHMCS availability must be confirmed before you can order this domain. Please try again shortly.'
+        : available
             ? 'Secure it now or bundle it with cloud hosting.'
             : 'The exact match is taken, but these alternatives may still work for your business.';
 
@@ -169,9 +169,9 @@ function renderDomainResults(root, data) {
 
 function renderExactDomainCard(item) {
     const price = formatDomainPrice(item);
-    const available = item.available !== false;
+    const available = item.available === true;
     const badge = item.available === null || item.available === undefined
-        ? '<span class="result-badge">Check at checkout</span>'
+        ? '<span class="result-badge muted">Check unavailable</span>'
         : item.available ? '<span class="result-badge">Match</span>' : '<span class="result-badge muted">Taken</span>';
     const button = available
         ? `<a class="btn btn-primary" href="${escapeAttr(item.checkout_url || item.domain_url)}">Get domain</a>`
@@ -181,7 +181,7 @@ function renderExactDomainCard(item) {
         <article class="domain-result-card exact-card">
             <div class="card-topline">${badge}<span>${escapeHtml(item.tld)}</span></div>
             <h3>${escapeHtml(item.domain)}</h3>
-            <p>${available ? 'Exact match domain ready for main-site checkout and WHMCS-backed billing.' : 'This exact domain is already registered.'}</p>
+            <p>${available ? 'Exact match domain ready for main-site checkout and WHMCS-backed billing.' : unavailableDomainText(item)}</p>
             <div class="domain-price">${price}<small>/yr</small></div>
             ${button}
         </article>
@@ -189,7 +189,7 @@ function renderExactDomainCard(item) {
 }
 
 function renderHostingBundleCard(item, hostingPid) {
-    const disabled = item.available === false || !hostingPid || hostingPid === 'HOSTING_PID_HERE';
+    const disabled = item.available !== true || !hostingPid || hostingPid === 'HOSTING_PID_HERE';
     const button = disabled
         ? '<button class="btn btn-light" type="button" disabled>Hosting bundle unavailable</button>'
         : `<a class="btn btn-primary" href="${escapeAttr(item.bundle_checkout_url || item.hosting_url)}">Get domain + hosting</a>`;
@@ -211,9 +211,9 @@ function renderHostingBundleCard(item, hostingPid) {
 
 function renderAlternativeRow(item) {
     const price = formatDomainPrice(item);
-    const available = item.available !== false;
+    const available = item.available === true;
     const status = item.available === null || item.available === undefined
-        ? '<span class="availability-pill">Check at checkout</span>'
+        ? '<span class="availability-pill taken">Check unavailable</span>'
         : item.available ? '<span class="availability-pill">Available</span>' : '<span class="availability-pill taken">Taken</span>';
     const action = available
         ? `<a class="btn btn-outline" href="${escapeAttr(item.checkout_url || item.domain_url)}">Get domain</a>`
@@ -229,6 +229,14 @@ function renderAlternativeRow(item) {
             ${action}
         </div>
     `;
+}
+
+function unavailableDomainText(item) {
+    if (item.available === null || item.available === undefined) {
+        return 'Live WHMCS availability could not be confirmed for this extension.';
+    }
+
+    return 'This exact domain is already registered.';
 }
 
 function renderDomainError(root, message) {
