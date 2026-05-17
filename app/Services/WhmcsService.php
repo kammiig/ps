@@ -322,6 +322,7 @@ final class WhmcsService
         ];
         if ($accessKey !== '') {
             $auth['accesskey'] = $accessKey;
+            $auth['access_key'] = $accessKey;
         }
 
         $action = (string) ($params['action'] ?? 'unknown');
@@ -361,17 +362,22 @@ final class WhmcsService
                 $this->logError('WHMCS API error.', [
                     'action' => $action,
                     'message' => $message,
+                    'access_key_configured' => $accessKey !== '',
                 ]);
             }
-            $decoded['message'] = $this->safeApiMessage($message);
+            $decoded['message'] = $this->safeApiMessage($message, $accessKey !== '');
         }
 
         return $decoded;
     }
 
-    private function safeApiMessage(string $message): string
+    private function safeApiMessage(string $message, bool $hasAccessKey): string
     {
         if (str_contains(strtolower($message), 'invalid ip')) {
+            if ($hasAccessKey) {
+                return 'WHMCS is still rejecting the website server IP even though an API access key is configured. Check that the key in WHMCS configuration.php matches WHMCS_API_ACCESS_KEY exactly.';
+            }
+
             return 'WHMCS API access is blocking this website server. Please contact support.';
         }
 
