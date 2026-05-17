@@ -2,6 +2,8 @@
 $orderType = $old['order_type'] ?? 'bundle';
 $selectedPlan = $old['hosting_plan'] ?? ($plans[0]['slug'] ?? '');
 $domain = $old['domain'] ?? '';
+$billingCycle = strtolower((string) ($old['billing_cycle'] ?? $checkoutConfig['default_billing_cycle'] ?? 'monthly'));
+$billingCycle = in_array($billingCycle, ['annually', 'annual', 'yearly', 'year'], true) ? 'annually' : 'monthly';
 $usesHosting = in_array($orderType, ['hosting', 'bundle'], true);
 $isHostingOnly = $orderType === 'hosting';
 $isDomainOnly = $orderType === 'domain';
@@ -81,18 +83,32 @@ $websitePid = (int) (($checkoutConfig['website_package']['pid'] ?? 0));
                             <h2>Hosting package</h2>
                         </div>
                     </div>
+                    <div class="billing-cycle-toggle" data-billing-toggle>
+                        <label>
+                            <input type="radio" name="billing_cycle" value="monthly" <?= $billingCycle === 'monthly' ? 'checked' : '' ?>>
+                            <span>Monthly</span>
+                        </label>
+                        <label>
+                            <input type="radio" name="billing_cycle" value="annually" <?= $billingCycle === 'annually' ? 'checked' : '' ?>>
+                            <span>Yearly</span>
+                        </label>
+                    </div>
                     <div class="checkout-plan-list">
                         <?php foreach ($plans as $plan): ?>
+                            <?php $yearlyPrice = trim((string) ($plan['yearly_price'] ?? '')); ?>
                             <label class="checkout-plan">
                                 <input type="radio" name="hosting_plan" value="<?= e($plan['slug']) ?>" <?= $selectedPlan === $plan['slug'] ? 'checked' : '' ?>>
                                 <span>
                                     <strong><?= e($plan['title']) ?></strong>
-                                    <small><?= e(money($plan['monthly_price'])) ?>/month · PID <?= e($plan['checkout_pid'] ?: 'not set') ?></small>
+                                    <small>
+                                        <span class="plan-price-monthly"><?= e(money($plan['monthly_price'])) ?>/month</span>
+                                        <span class="plan-price-yearly"><?= $yearlyPrice !== '' ? e(money($yearlyPrice)) . '/year' : 'Yearly price not set' ?></span>
+                                        · PID <?= e($plan['checkout_pid'] ?: 'not set') ?>
+                                    </small>
                                 </span>
                             </label>
                         <?php endforeach; ?>
                     </div>
-                    <input type="hidden" name="billing_cycle" value="<?= e($old['billing_cycle'] ?? '') ?>">
                 </section>
 
                 <section class="checkout-panel" data-checkout-section="details">

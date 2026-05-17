@@ -354,14 +354,28 @@ final class WhmcsService
             return ['result' => 'error', 'message' => 'WHMCS returned invalid JSON. Check the API URL and WHMCS error output.'];
         }
 
-        if ($logErrors && ($decoded['result'] ?? '') !== 'success') {
-            $this->logError('WHMCS API error.', [
-                'action' => $action,
-                'message' => $decoded['message'] ?? 'Unknown WHMCS error.',
-            ]);
+        if (($decoded['result'] ?? '') !== 'success') {
+            $message = (string) ($decoded['message'] ?? 'Unknown WHMCS error.');
+            $isExpectedNotFound = str_contains(strtolower($message), 'not found');
+            if ($logErrors || !$isExpectedNotFound) {
+                $this->logError('WHMCS API error.', [
+                    'action' => $action,
+                    'message' => $message,
+                ]);
+            }
+            $decoded['message'] = $this->safeApiMessage($message);
         }
 
         return $decoded;
+    }
+
+    private function safeApiMessage(string $message): string
+    {
+        if (str_contains(strtolower($message), 'invalid ip')) {
+            return 'WHMCS API access is blocking this website server. Please contact support.';
+        }
+
+        return $message;
     }
 
     private function postApiRequest(string $apiUrl, string $payload, string $action): array
@@ -481,7 +495,6 @@ final class WhmcsService
         $base = env('WHMCS_URL', '');
         return $base ? rtrim((string) $base, '/') . '/includes/api.php' : '';
     }
-
     private function logError(string $message, array $context = []): void
     {
         $dir = STORAGE_PATH . '/logs';

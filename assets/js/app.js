@@ -41,6 +41,7 @@ function initCheckoutForm(form) {
     const domainTitle = form.querySelector('[data-domain-title]');
     const domainLabel = form.querySelector('[data-domain-label]');
     const domainHelp = form.querySelector('[data-domain-help]');
+    const billingInputs = [...form.querySelectorAll('input[name="billing_cycle"]')];
 
     const update = () => {
         const type = form.querySelector('input[name="order_type"]:checked')?.value || 'bundle';
@@ -48,6 +49,8 @@ function initCheckoutForm(form) {
         const isHostingOnly = type === 'hosting';
         const usesHosting = type === 'hosting' || type === 'bundle';
         const usesDomain = type === 'domain' || type === 'bundle' || type === 'website';
+        const billingCycle = form.querySelector('input[name="billing_cycle"]:checked')?.value || 'monthly';
+        form.dataset.billingCycle = billingCycle;
 
         if (domainSection) {
             domainSection.hidden = false;
@@ -61,6 +64,10 @@ function initCheckoutForm(form) {
             domainInput.required = usesDomain && !isHostingOnly;
             domainInput.placeholder = isHostingOnly ? 'your-existing-domain.com' : 'example.com';
         }
+
+        billingInputs.forEach((input) => {
+            input.disabled = !usesHosting;
+        });
 
         if (domainTitle) {
             domainTitle.textContent = isHostingOnly ? 'Existing domain' : 'Domain';
@@ -86,6 +93,7 @@ function initCheckoutForm(form) {
     };
 
     typeInputs.forEach((input) => input.addEventListener('change', update));
+    billingInputs.forEach((input) => input.addEventListener('change', update));
     update();
 }
 

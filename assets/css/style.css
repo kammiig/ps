@@ -1620,6 +1620,52 @@ textarea {
     grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.billing-cycle-toggle {
+    display: inline-grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    margin: 2px 0 16px;
+    padding: 6px;
+    background: #eef7f8;
+    border: 1px solid #d8eaee;
+    border-radius: 999px;
+}
+
+.billing-cycle-toggle label {
+    position: relative;
+    margin: 0;
+    cursor: pointer;
+}
+
+.billing-cycle-toggle input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    min-height: 100%;
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.billing-cycle-toggle span {
+    display: block;
+    min-width: 118px;
+    padding: 10px 18px;
+    color: var(--muted);
+    font-size: .9rem;
+    font-weight: 900;
+    line-height: 1;
+    text-align: center;
+    border-radius: 999px;
+    transition: background .18s ease, box-shadow .18s ease, color .18s ease;
+}
+
+.billing-cycle-toggle input:checked + span {
+    background: var(--white);
+    color: var(--navy);
+    box-shadow: 0 10px 22px rgba(7, 24, 43, .1);
+}
+
 .checkout-choice,
 .checkout-plan {
     position: relative;
@@ -1667,6 +1713,15 @@ textarea {
     color: var(--muted);
     font-size: .92rem;
     line-height: 1.5;
+}
+
+.plan-price-yearly,
+.checkout-layout[data-billing-cycle="annually"] .plan-price-monthly {
+    display: none;
+}
+
+.checkout-layout[data-billing-cycle="annually"] .plan-price-yearly {
+    display: inline;
 }
 
 .checkout-help {
@@ -2524,6 +2579,15 @@ td {
     .checkout-panel,
     .checkout-summary-card {
         padding: 22px;
+    }
+
+    .billing-cycle-toggle {
+        width: 100%;
+    }
+
+    .billing-cycle-toggle span {
+        min-width: 0;
+        padding-inline: 12px;
     }
 
     .hosting-visual {

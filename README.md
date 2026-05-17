@@ -79,6 +79,8 @@ That endpoint validates the domain server-side, calls WHMCS `DomainWhois`, fetch
 
 If WHMCS has API IP access restrictions enabled with an access key, set `WHMCS_API_ACCESS_KEY` in `.env`. The integration uses cURL when available and logs safe diagnostics to `storage/logs/whmcs-api.log` if cPanel cannot reach WHMCS.
 
+If the log shows `Invalid IP 185.61.154.29`, allow `185.61.154.29` in WHMCS API IP access settings or set the matching API access key in `.env`.
+
 Domain-only, hosting-only, domain + hosting and website package buttons now send visitors to:
 
 `/checkout`

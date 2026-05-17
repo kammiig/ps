@@ -82,6 +82,8 @@ Checkout does not trust frontend prices. WHMCS creates the actual invoice and pr
 
 If domain search or checkout says WHMCS is not responding, check `storage/logs/whmcs-api.log`. The website calls WHMCS server-side using cURL first, then a PHP stream fallback. Most failures are caused by missing API credentials, WHMCS API IP restrictions, an incorrect `WHMCS_API_URL`, or cPanel outbound HTTPS/SSL issues.
 
+If the log says `Invalid IP 185.61.154.29`, WHMCS is blocking the main website server. Add `185.61.154.29` to the allowed API IP list in WHMCS or configure a WHMCS API access key and set it as `WHMCS_API_ACCESS_KEY` in `.env`.
+
 ## WordPress Shortcodes
 
 The optional file `wordpress/planetic-whmcs-shortcodes.php` provides:

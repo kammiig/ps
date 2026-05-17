@@ -204,8 +204,8 @@ final class SiteController extends Controller
                 if ($candidate === $domain) {
                     return $this->json([
                         'ok' => false,
-                        'message' => 'Live WHMCS domain availability could not be checked. Please verify WHMCS API credentials, API IP access and cPanel cURL/SSL support.',
-                    ], 502);
+                        'message' => $this->publicWhmcsErrorMessage($availability['message'] ?? ''),
+                    ]);
                 }
             }
 
@@ -255,7 +255,7 @@ final class SiteController extends Controller
             'order_type' => $old['order_type'] ?? $_GET['type'] ?? 'bundle',
             'domain' => $old['domain'] ?? $_GET['domain'] ?? '',
             'hosting_plan' => $old['hosting_plan'] ?? $_GET['plan'] ?? '',
-            'billing_cycle' => $old['billing_cycle'] ?? '',
+            'billing_cycle' => $old['billing_cycle'] ?? $_GET['billing_cycle'] ?? '',
         ];
 
         $plans = $this->checkoutPlans();
@@ -284,6 +284,16 @@ final class SiteController extends Controller
         ]));
     }
 
+    private function publicWhmcsErrorMessage(string $message): string
+    {
+        $message = strtolower($message);
+        if (str_contains($message, 'invalid ip') || str_contains($message, 'api access')) {
+            return 'Live WHMCS domain availability is blocked by WHMCS API IP access settings. Please contact support or try again shortly.';
+        }
+
+        return 'Live WHMCS domain availability could not be checked. Please try again shortly.';
+    }
+
     public function submitCheckout(): string
     {
         if (!Csrf::verify($_POST['_csrf'] ?? null)) {
@@ -299,7 +309,7 @@ final class SiteController extends Controller
             $availability = $this->whmcs->checkDomain($data['domain']);
             if (!$availability['ok']) {
                 return $this->checkout([
-                    'Live WHMCS domain availability could not be checked. Please verify the WHMCS API connection before registering domains.',
+                    $this->publicWhmcsErrorMessage($availability['message'] ?? ''),
                 ], $data);
             }
 
@@ -617,7 +627,7 @@ final class SiteController extends Controller
             'order_type' => trim((string) ($input['order_type'] ?? '')),
             'domain' => $this->normaliseDomain((string) ($input['domain'] ?? '')),
             'hosting_plan' => trim((string) ($input['hosting_plan'] ?? '')),
-            'billing_cycle' => trim((string) ($input['billing_cycle'] ?? '')),
+            'billing_cycle' => $this->normaliseBillingCycle((string) ($input['billing_cycle'] ?? '')),
             'first_name' => trim((string) ($input['first_name'] ?? '')),
             'last_name' => trim((string) ($input['last_name'] ?? '')),
             'email' => trim((string) ($input['email'] ?? '')),
@@ -768,6 +778,16 @@ final class SiteController extends Controller
 
         parse_str($query, $params);
         return (int) ($params['pid'] ?? 0);
+    }
+
+    private function normaliseBillingCycle(string $cycle): string
+    {
+        $cycle = strtolower(trim($cycle));
+        return match ($cycle) {
+            'annual', 'annually', 'year', 'yearly' => 'annually',
+            'monthly' => 'monthly',
+            default => '',
+        };
     }
 
     private function supportedTlds(): array
