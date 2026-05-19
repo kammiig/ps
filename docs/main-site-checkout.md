@@ -84,6 +84,27 @@ If domain search or checkout says WHMCS is not responding, check `storage/logs/w
 
 If the log says `Invalid IP 185.61.154.29`, WHMCS is blocking the main website server. Add `185.61.154.29` to the allowed API IP list in WHMCS or configure a WHMCS API access key and set it as `WHMCS_API_ACCESS_KEY` in `.env`.
 
+If the access key is configured but WHMCS still returns `Invalid IP`, use the local bridge:
+
+```text
+whmcs-bridge/planetic-local-api.php
+```
+
+Upload it to:
+
+```text
+public_html/clientarea/planetic-local-api.php
+```
+
+Edit the uploaded file and replace `change_this_long_random_token` with a long random token, then add this to the main website `.env`:
+
+```env
+WHMCS_LOCAL_API_BRIDGE_URL=https://planeticsolution.com/clientarea/planetic-local-api.php
+WHMCS_LOCAL_API_BRIDGE_TOKEN=the_same_long_random_token
+```
+
+The main website will prefer the local bridge when both bridge variables are configured. This keeps API calls server-side and uses WHMCS `localAPI()` from inside the WHMCS installation.
+
 ## WordPress Shortcodes
 
 The optional file `wordpress/planetic-whmcs-shortcodes.php` provides:

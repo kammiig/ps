@@ -9,6 +9,8 @@ return [
     'api_secret' => env('WHMCS_API_SECRET', ''),
     'api_access_key' => env('WHMCS_API_ACCESS_KEY', ''),
     'api_ssl_verify' => filter_var(env('WHMCS_API_SSL_VERIFY', true), FILTER_VALIDATE_BOOLEAN),
+    'local_bridge_url' => env('WHMCS_LOCAL_API_BRIDGE_URL', ''),
+    'local_bridge_token' => env('WHMCS_LOCAL_API_BRIDGE_TOKEN', ''),
     'payment_method' => env('WHMCS_PAYMENT_METHOD', 'stripe'),
     'currency_id' => (int) env('WHMCS_CURRENCY_ID', 1),
     'default_billing_cycle' => env('WHMCS_DEFAULT_BILLING_CYCLE', 'monthly'),

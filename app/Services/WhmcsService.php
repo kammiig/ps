@@ -304,7 +304,10 @@ final class WhmcsService
 
     private function callApi(array $params, bool $logErrors = true): array
     {
-        $apiUrl = $this->apiUrl();
+        $bridgeUrl = $this->bridgeUrl();
+        $bridgeToken = $this->bridgeToken();
+        $useBridge = $bridgeUrl !== '' && $bridgeToken !== '';
+        $apiUrl = $useBridge ? $bridgeUrl : $this->apiUrl();
         $identifier = trim((string) ($this->settings['whmcs_api_identifier'] ?? ''));
         $secret = trim((string) ($this->settings['whmcs_api_secret'] ?? ''));
         $accessKey = trim((string) ($this->settings['whmcs_api_access_key'] ?? ''));
@@ -312,17 +315,22 @@ final class WhmcsService
         $secret = $secret !== '' ? $secret : (string) ($this->config['api_secret'] ?? env('WHMCS_API_SECRET', ''));
         $accessKey = $accessKey !== '' ? $accessKey : (string) ($this->config['api_access_key'] ?? env('WHMCS_API_ACCESS_KEY', ''));
 
-        if (!$apiUrl || !$identifier || !$secret) {
+        if (!$apiUrl || (!$useBridge && (!$identifier || !$secret))) {
             return ['result' => 'error', 'message' => 'WHMCS API credentials are not configured.'];
         }
 
-        $auth = [
-            'identifier' => $identifier,
-            'secret' => $secret,
-        ];
-        if ($accessKey !== '') {
-            $auth['accesskey'] = $accessKey;
-            $auth['access_key'] = $accessKey;
+        $auth = [];
+        if ($useBridge) {
+            $auth['bridge_token'] = $bridgeToken;
+        } else {
+            $auth = [
+                'identifier' => $identifier,
+                'secret' => $secret,
+            ];
+            if ($accessKey !== '') {
+                $auth['accesskey'] = $accessKey;
+                $auth['access_key'] = $accessKey;
+            }
         }
 
         $action = (string) ($params['action'] ?? 'unknown');
@@ -333,6 +341,7 @@ final class WhmcsService
             $this->logError('WHMCS API did not respond.', [
                 'action' => $action,
                 'transport' => $transport['transport'] ?? 'unknown',
+                'local_bridge' => $useBridge,
                 'http_status' => $transport['http_status'] ?? 0,
                 'diagnostic' => $transport['diagnostic'] ?? '',
             ]);
@@ -349,6 +358,7 @@ final class WhmcsService
             $this->logError('WHMCS returned invalid JSON.', [
                 'action' => $action,
                 'transport' => $transport['transport'] ?? 'unknown',
+                'local_bridge' => $useBridge,
                 'http_status' => $transport['http_status'] ?? 0,
                 'response_preview' => substr(strip_tags($response), 0, 220),
             ]);
@@ -362,6 +372,7 @@ final class WhmcsService
                 $this->logError('WHMCS API error.', [
                     'action' => $action,
                     'message' => $message,
+                    'local_bridge' => $useBridge,
                     'access_key_configured' => $accessKey !== '',
                 ]);
             }
@@ -501,6 +512,19 @@ final class WhmcsService
         $base = env('WHMCS_URL', '');
         return $base ? rtrim((string) $base, '/') . '/includes/api.php' : '';
     }
+
+    private function bridgeUrl(): string
+    {
+        $configured = trim((string) ($this->settings['whmcs_local_api_bridge_url'] ?? ''));
+        return $configured !== '' ? $configured : trim((string) ($this->config['local_bridge_url'] ?? env('WHMCS_LOCAL_API_BRIDGE_URL', '')));
+    }
+
+    private function bridgeToken(): string
+    {
+        $configured = trim((string) ($this->settings['whmcs_local_api_bridge_token'] ?? ''));
+        return $configured !== '' ? $configured : trim((string) ($this->config['local_bridge_token'] ?? env('WHMCS_LOCAL_API_BRIDGE_TOKEN', '')));
+    }
+
     private function logError(string $message, array $context = []): void
     {
         $dir = STORAGE_PATH . '/logs';

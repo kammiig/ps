@@ -59,6 +59,8 @@ WHMCS_API_IDENTIFIER=your_identifier
 WHMCS_API_SECRET=your_secret
 WHMCS_API_ACCESS_KEY=
 WHMCS_API_SSL_VERIFY=true
+WHMCS_LOCAL_API_BRIDGE_URL=
+WHMCS_LOCAL_API_BRIDGE_TOKEN=
 WHMCS_PAYMENT_METHOD=stripe
 WHMCS_STARTER_HOSTING_PID=1
 WHMCS_BUSINESS_HOSTING_PID=2
@@ -80,6 +82,19 @@ That endpoint validates the domain server-side, calls WHMCS `DomainWhois`, fetch
 If WHMCS has API IP access restrictions enabled with an access key, set `WHMCS_API_ACCESS_KEY` in `.env`. The integration uses cURL when available and logs safe diagnostics to `storage/logs/whmcs-api.log` if cPanel cannot reach WHMCS.
 
 If the log shows `Invalid IP 185.61.154.29`, allow `185.61.154.29` in WHMCS API IP access settings or set the matching API access key in `.env`.
+
+If WHMCS continues rejecting external API calls with `Invalid IP`, use the included local bridge instead:
+
+1. Upload `whmcs-bridge/planetic-local-api.php` into `public_html/clientarea/planetic-local-api.php`.
+2. Edit the uploaded file and replace `change_this_long_random_token` with a long random token.
+3. Add the same token and bridge URL to `.env`:
+
+```env
+WHMCS_LOCAL_API_BRIDGE_URL=https://planeticsolution.com/clientarea/planetic-local-api.php
+WHMCS_LOCAL_API_BRIDGE_TOKEN=the_same_long_random_token
+```
+
+The bridge uses WHMCS `localAPI()` inside the WHMCS installation and avoids the external API IP restriction.
 
 Domain-only, hosting-only, domain + hosting and website package buttons now send visitors to:
 
