@@ -22,13 +22,6 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-$providedToken = (string) ($_POST['bridge_token'] ?? '');
-if ($bridgeToken === 'change_this_long_random_token' || !hash_equals($bridgeToken, $providedToken)) {
-    http_response_code(403);
-    echo json_encode(['result' => 'error', 'message' => 'Bridge authentication failed.']);
-    exit;
-}
-
 $allowedActions = [
     'DomainWhois',
     'GetTLDPricing',
@@ -58,6 +51,13 @@ require $initPath;
 
 if (isset($planetic_bridge_token) && is_string($planetic_bridge_token) && $planetic_bridge_token !== '') {
     $bridgeToken = $planetic_bridge_token;
+}
+
+$providedToken = (string) ($_POST['bridge_token'] ?? '');
+if ($bridgeToken === 'change_this_long_random_token' || !hash_equals($bridgeToken, $providedToken)) {
+    http_response_code(403);
+    echo json_encode(['result' => 'error', 'message' => 'Bridge authentication failed.']);
+    exit;
 }
 
 $params = $_POST;
