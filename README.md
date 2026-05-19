@@ -96,6 +96,12 @@ WHMCS_LOCAL_API_BRIDGE_TOKEN=the_same_long_random_token
 
 The bridge uses WHMCS `localAPI()` inside the WHMCS installation and avoids the external API IP restriction.
 
+If the log says `Bridge authentication failed`, the token in the main website `.env` does not match the token in `clientarea/planetic-local-api.php`. You can also define the bridge token in WHMCS `configuration.php`:
+
+```php
+$planetic_bridge_token = 'the_same_long_random_token';
+```
+
 Domain-only, hosting-only, domain + hosting and website package buttons now send visitors to:
 
 `/checkout`

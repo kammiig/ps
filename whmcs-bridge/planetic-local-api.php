@@ -56,6 +56,10 @@ if (!is_file($initPath)) {
 
 require $initPath;
 
+if (isset($planetic_bridge_token) && is_string($planetic_bridge_token) && $planetic_bridge_token !== '') {
+    $bridgeToken = $planetic_bridge_token;
+}
+
 $params = $_POST;
 unset(
     $params['action'],

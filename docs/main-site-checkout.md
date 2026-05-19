@@ -105,6 +105,12 @@ WHMCS_LOCAL_API_BRIDGE_TOKEN=the_same_long_random_token
 
 The main website will prefer the local bridge when both bridge variables are configured. This keeps API calls server-side and uses WHMCS `localAPI()` from inside the WHMCS installation.
 
+If `storage/logs/whmcs-api.log` says `Bridge authentication failed`, the token in the main website `.env` does not match the token in the uploaded bridge file. The bridge can also read the token from WHMCS `configuration.php`:
+
+```php
+$planetic_bridge_token = 'the_same_long_random_token';
+```
+
 ## WordPress Shortcodes
 
 The optional file `wordpress/planetic-whmcs-shortcodes.php` provides:
