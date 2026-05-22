@@ -14,13 +14,13 @@ $logo = upload_url($settings['logo_url'] ?? '');
                 <span class="brand-text"><strong>Planetic</strong> Solutions</span>
             <?php endif; ?>
         </a>
-        <button class="nav-toggle" type="button" aria-label="Open navigation" aria-expanded="false" data-nav-toggle>
+        <button class="nav-toggle" type="button" aria-label="Open navigation" aria-expanded="false" aria-controls="main-navigation" data-nav-toggle>
             <span></span><span></span><span></span>
         </button>
-        <nav class="site-nav" aria-label="Main navigation" data-nav>
+        <nav id="main-navigation" class="site-nav" aria-label="Main navigation" data-nav>
             <a class="<?= e(is_active('/domains')) ?>" href="<?= e(url('/domains')) ?>">Domains</a>
             <div class="nav-item has-dropdown">
-                <a class="nav-link <?= e(is_active('/hosting')) ?>" href="<?= e(url('/hosting')) ?>">Hosting</a>
+                <a class="nav-link <?= e(is_active('/hosting')) ?>" href="<?= e(url('/hosting')) ?>" aria-haspopup="true">Hosting</a>
                 <div class="nav-dropdown" aria-label="Hosting menu">
                     <a href="<?= e(url('/hosting')) ?>">All Hosting Plans</a>
                     <a href="<?= e(url('/wordpress-hosting')) ?>">WordPress Hosting</a>

@@ -1,13 +1,15 @@
 <?php
 $features = json_decode($package['features_json'] ?? '[]', true) ?: [];
 $packageOrderUrl = url('/checkout?type=website');
+$packagePrice = preg_replace('/[^0-9.]/', '', (string) ($package['price'] ?? '199')) ?: '199';
+$packagePriceLabel = '£' . rtrim(rtrim(number_format((float) $packagePrice, 2, '.', ''), '0'), '.');
 ?>
 <section class="page-hero">
     <div class="container page-hero-grid">
         <div>
             <span class="section-kicker">Website development package</span>
-            <h1>Complete Business Website in Just £200</h1>
-            <p>Professional business website setup with hosting support, domain registration support, mobile responsive design, Cloudflare CDN and 48 hour delivery.</p>
+            <h1>Bespoke Website Development for just <?= e($packagePriceLabel) ?></h1>
+            <p>Launch a professional business website with domain, hosting setup, Elementor, premium Envato elements, stock photos, content writing and Cloudflare integration included.</p>
             <div class="actions">
                 <a class="btn btn-primary" href="<?= e($packageOrderUrl) ?>"><?= e(($package['cta_text'] ?? '') ?: 'Order Now') ?> <?= icon('arrow') ?></a>
                 <a class="btn btn-outline" href="<?= e(url('/contact')) ?>">Ask a Question</a>
@@ -15,8 +17,8 @@ $packageOrderUrl = url('/checkout?type=website');
         </div>
         <aside class="page-hero-card price-card">
             <span class="mini-label">Fixed package price</span>
-            <strong>£200</strong>
-            <p>Website, hosting setup, SEO basics and Cloudflare CDN support.</p>
+            <strong><?= e($packagePriceLabel) ?></strong>
+            <p>Website, first-year domain and hosting support, content, SSL and Cloudflare setup.</p>
         </aside>
     </div>
 </section>
@@ -26,7 +28,7 @@ $packageOrderUrl = url('/checkout?type=website');
         <div>
             <span class="section-kicker">What is included</span>
             <h2>Premium setup without the premium agency bill</h2>
-            <p class="lead">Get a professional business website with hosting setup, domain registration support, premium design tools where legally licensed, Envato templates/assets where legally licensed, stock images, basic SEO setup and Cloudflare CDN. Delivery in just 48 hours.</p>
+            <p class="lead">Get a professional business website with first-year domain and hosting support, Elementor setup, Envato premium elements, stock photos, premium content writing, SSL and Cloudflare integration. Delivery in just 48 hours.</p>
         </div>
         <div class="included-panel">
             <ul class="feature-list columns">

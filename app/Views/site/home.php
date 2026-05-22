@@ -5,19 +5,19 @@ $primaryText = $settings['home_primary_cta_text'] ?? 'Search Domain';
 $primaryUrl = $settings['home_primary_cta_url'] ?? '#domain-search';
 $secondaryText = $settings['home_secondary_cta_text'] ?? 'View Hosting Plans';
 $secondaryUrl = $settings['home_secondary_cta_url'] ?? url('/hosting');
-$websiteText = $settings['home_website_cta_text'] ?? 'Get Website for £200';
+$websiteText = $settings['home_website_cta_text'] ?? 'Get Website for £199';
 $websiteUrl = $settings['home_website_cta_url'] ?? url('/website-development');
 $packageOrderUrl = url('/checkout?type=website');
 $websiteChecklist = [
     'Professional business website',
-    'Free hosting setup',
-    'Domain registration support',
-    'Elementor/page builder setup where legally licensed',
-    'Envato templates/assets where legally licensed',
-    'Stock images',
-    'Basic content writing',
-    'Basic SEO setup',
-    'Cloudflare CDN',
+    'Free domain and hosting for 1 year',
+    'Free Elementor',
+    'Free Envato premium elements',
+    'Free stock photos',
+    'Free premium content writing',
+    'Free Cloudflare integration',
+    'Free SSL setup',
+    'Free domain and hosting setup support',
     'Delivery in 48 hours',
 ];
 ?>
@@ -145,8 +145,8 @@ $websiteChecklist = [
     <div class="container split">
         <div>
             <span class="section-kicker">Website development offer</span>
-            <h2>Complete Business Website in Just £200</h2>
-            <p class="lead">Get a professional business website with hosting setup, domain registration support, premium design tools where legally licensed, Envato templates/assets where legally licensed, stock images, basic SEO setup and Cloudflare CDN. Delivery in just 48 hours.</p>
+            <h2>Bespoke Website Development for just £199</h2>
+            <p class="lead">Launch a professional business website with domain, hosting setup, Elementor, premium Envato elements, stock photos, content writing and Cloudflare integration included.</p>
             <div class="actions">
                 <a class="btn btn-primary" href="<?= e($packageOrderUrl) ?>"><?= e(($package['cta_text'] ?? '') ?: 'Order Website Package') ?> <?= icon('arrow') ?></a>
                 <a class="btn btn-outline" href="<?= e(url('/website-development')) ?>">See what is included</a>

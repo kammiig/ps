@@ -11,9 +11,9 @@
             </form>
         </div>
 
-        <div class="domain-results-shell" data-domain-results data-domain="<?= e($domain ?? '') ?>">
+        <div class="domain-results-shell" data-domain-results data-domain="<?= e($domain ?? '') ?>" aria-live="polite" aria-atomic="true">
             <?php if (!empty($domain)): ?>
-                <div class="domain-loading">
+                <div class="domain-loading" role="status">
                     <span class="loader"></span>
                     <strong>Checking <?= e($domain) ?>...</strong>
                     <p>Availability and live WHMCS pricing are loading.</p>

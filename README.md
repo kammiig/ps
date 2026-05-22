@@ -48,7 +48,7 @@ In Admin > Settings and `.env`, configure:
 - WHMCS API Identifier
 - WHMCS API Secret
 - WHMCS payment gateway system name, for example `stripe` or `paypal`
-- Product IDs for hosting plans and the £200 website package
+- Product IDs for hosting plans and the £199 website package
 
 The `.env` file should include:
 
@@ -67,6 +67,7 @@ WHMCS_BUSINESS_HOSTING_PID=2
 WHMCS_WORDPRESS_HOSTING_PID=3
 WHMCS_RESELLER_HOSTING_PID=4
 WHMCS_WEBSITE_PACKAGE_PID=5
+WHMCS_WEBSITE_PRICE_OVERRIDE=199.00
 ```
 
 The homepage domain form now sends visitors to:
@@ -124,7 +125,7 @@ Live domain checkout pricing should remain controlled inside WHMCS. The `/domain
 
 - Homepage hero, CTAs, service cards, trust badges and feature sections
 - Hosting plans with prices, features, WHMCS product mapping and highlighted badges
-- £200 website development package
+- £199 website development package
 - TLD display prices and domain URLs
 - About and legal pages
 - Blog posts with slug, category, metadata, featured image, alt text and status

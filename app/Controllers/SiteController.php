@@ -115,7 +115,7 @@ final class SiteController extends Controller
             'faqs' => $faqs,
             'schemas' => [
                 $this->faqSchema($faqs),
-                $this->serviceSchema('Complete Business Website in Just £200', 'Business website package with hosting setup, domain registration support, SEO setup, Cloudflare CDN and 48 hour delivery.'),
+                $this->serviceSchema('Bespoke Website Development for just £199', 'Business website package with first-year domain and hosting support, Elementor setup, content writing, SSL, Cloudflare CDN and 48 hour delivery.'),
             ],
             'breadcrumbs' => [
                 ['name' => 'Home', 'url' => url('/')],
@@ -189,6 +189,17 @@ final class SiteController extends Controller
         $orderedTlds = array_values(array_unique(array_merge([$parsed['tld']], $tlds)));
         $currency = $pricingOk ? $this->currencyPrefix($pricing['currency'] ?? []) : '£';
         $hostingPid = $this->hostingPid();
+        $package = $this->content->package();
+        $websiteConfig = $this->whmcs->checkoutConfig()['website_package'] ?? [];
+        $websitePriceRaw = (string) ($websiteConfig['price_override'] ?? $package['price'] ?? '199.00');
+        $websitePrice = preg_replace('/[^0-9.]/', '', $websitePriceRaw) ?: '199.00';
+        $websitePackage = [
+            'title' => (string) (($package['title'] ?? '') ?: 'Bespoke Website Development'),
+            'description' => (string) (($package['description'] ?? '') ?: 'Launch a professional business website with domain, hosting setup, Elementor, premium Envato elements, stock photos, content writing and Cloudflare integration included.'),
+            'price' => number_format((float) $websitePrice, 2, '.', ''),
+            'cta_text' => (string) (($package['cta_text'] ?? '') ?: 'Get Complete Website Package'),
+            'features' => json_decode($package['features_json'] ?? '[]', true) ?: [],
+        ];
         $results = [];
         $availabilityErrors = [];
 
@@ -217,6 +228,11 @@ final class SiteController extends Controller
                 'type' => 'bundle',
                 'domain' => $candidate,
             ]));
+            $websiteCheckoutParams = ['type' => 'website'];
+            if (!empty($availability['ok']) && !empty($availability['available'])) {
+                $websiteCheckoutParams['domain'] = $candidate;
+            }
+            $websiteCheckoutUrl = url('/checkout?' . http_build_query($websiteCheckoutParams));
 
             $results[] = [
                 'domain' => $candidate,
@@ -230,6 +246,8 @@ final class SiteController extends Controller
                 'hosting_url' => $bundleCheckoutUrl,
                 'checkout_url' => $domainCheckoutUrl,
                 'bundle_checkout_url' => $bundleCheckoutUrl,
+                'website_checkout_url' => $websiteCheckoutUrl,
+                'website_package' => $websitePackage,
             ];
         }
 
@@ -741,6 +759,10 @@ final class SiteController extends Controller
             }
         } elseif ($domain !== '') {
             $payload['domain'] = [$domain];
+        }
+
+        if (array_key_exists('price_override', $website) && (string) $website['price_override'] !== '') {
+            $payload['priceoverride'] = [(string) $website['price_override']];
         }
 
         return ['ok' => true, 'payload' => $this->appendNameservers($payload)];

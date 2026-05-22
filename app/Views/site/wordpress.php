@@ -3,10 +3,10 @@
         <div>
             <span class="section-kicker">WordPress hosting</span>
             <h1>Fast WordPress Hosting with SSL, cPanel and Cloudflare CDN</h1>
-            <p>Launch WordPress with one-click installer support, LiteSpeed/cache-ready wording, Elementor-friendly resources and an optional £200 website development add-on.</p>
+            <p>Launch WordPress with one-click installer support, LiteSpeed/cache-ready wording, Elementor-friendly resources and an optional £199 bespoke website development package.</p>
             <div class="actions">
                 <a class="btn btn-primary" href="<?= e(url('/hosting')) ?>">View WordPress Plans <?= icon('arrow') ?></a>
-                <a class="btn btn-outline" href="<?= e(url('/website-development')) ?>">Get Website for £200</a>
+                <a class="btn btn-outline" href="<?= e(url('/website-development')) ?>">Get Website for £199</a>
             </div>
         </div>
         <aside class="page-hero-card wordpress-card">
@@ -52,7 +52,7 @@
         <div>
             <span class="section-kicker">Website add-on</span>
             <h2>Need the website built too?</h2>
-            <p class="lead">Order a complete business website for £200 with hosting setup, domain registration support, basic SEO setup, contact forms, responsive design and Cloudflare CDN.</p>
+            <p class="lead">Order a bespoke business website for £199 with first-year domain and hosting support, Elementor setup, content writing, stock photos, SSL and Cloudflare integration.</p>
         </div>
         <a class="btn btn-primary" href="<?= e(url('/website-development')) ?>">View Website Package <?= icon('arrow') ?></a>
     </div>

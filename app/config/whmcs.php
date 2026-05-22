@@ -44,6 +44,7 @@ return [
         'billing_cycle' => env('WHMCS_WEBSITE_BILLING_CYCLE', 'onetime'),
         'register_domain' => filter_var(env('WHMCS_WEBSITE_REGISTER_DOMAIN', true), FILTER_VALIDATE_BOOLEAN),
         'domain_price_override' => env('WHMCS_WEBSITE_DOMAIN_PRICE_OVERRIDE', '0.00'),
+        'price_override' => env('WHMCS_WEBSITE_PRICE_OVERRIDE', '199.00'),
     ],
     'domain_pricing' => [
         '.com' => ['price' => '12.99', 'regperiod' => 1],

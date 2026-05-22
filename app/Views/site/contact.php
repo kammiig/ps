@@ -6,7 +6,7 @@
             <?php if (!empty($page['body'])): ?>
                 <div class="content-body"><?= safe_html($page['body']) ?></div>
             <?php else: ?>
-                <p>Ask about hosting, reseller hosting, domain registration, Cloudflare setup or the £200 website package.</p>
+                <p>Ask about hosting, reseller hosting, domain registration, Cloudflare setup or the £199 website package.</p>
             <?php endif; ?>
         </div>
         <aside class="page-hero-card">
@@ -28,7 +28,7 @@
             <label>Phone<input name="phone" type="tel" value="<?= e($old['phone'] ?? '') ?>"></label>
             <label>Service Interested In
                 <select name="service" required>
-                    <?php foreach (['WordPress Hosting', 'cPanel Hosting', 'Reseller Hosting', 'Domain Registration', 'Website Development £200', 'Cloudflare CDN Setup'] as $service): ?>
+                    <?php foreach (['WordPress Hosting', 'cPanel Hosting', 'Reseller Hosting', 'Domain Registration', 'Website Development £199', 'Cloudflare CDN Setup'] as $service): ?>
                         <option value="<?= e($service) ?>" <?= (($old['service'] ?? '') === $service) ? 'selected' : '' ?>><?= e($service) ?></option>
                     <?php endforeach; ?>
                 </select>

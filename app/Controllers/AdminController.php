@@ -200,7 +200,7 @@ final class AdminController extends Controller
 
         return $this->adminRender('admin/form', [
             'title' => 'Website Development Package',
-            'subtitle' => 'Manage the £200 website offer, included features, delivery time and order route.',
+            'subtitle' => 'Manage the £199 website offer, included features, delivery time and order route.',
             'action' => url('/admin/package'),
             'values' => $package,
             'fields' => [

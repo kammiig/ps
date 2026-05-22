@@ -5,11 +5,23 @@ document.addEventListener('DOMContentLoaded', () => {
     const actions = document.querySelector('.nav-actions');
 
     if (toggle && nav) {
+        const setMenuState = (isOpen) => {
+            toggle.setAttribute('aria-expanded', String(isOpen));
+            toggle.setAttribute('aria-label', isOpen ? 'Close navigation' : 'Open navigation');
+            nav.classList.toggle('is-open', isOpen);
+            actions?.classList.toggle('is-open', isOpen);
+        };
+
         toggle.addEventListener('click', () => {
             const open = toggle.getAttribute('aria-expanded') === 'true';
-            toggle.setAttribute('aria-expanded', String(!open));
-            nav.classList.toggle('is-open', !open);
-            actions?.classList.toggle('is-open', !open);
+            setMenuState(!open);
+        });
+
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && toggle.getAttribute('aria-expanded') === 'true') {
+                setMenuState(false);
+                toggle.focus();
+            }
         });
     }
 
@@ -41,7 +53,15 @@ function initCheckoutForm(form) {
     const domainTitle = form.querySelector('[data-domain-title]');
     const domainLabel = form.querySelector('[data-domain-label]');
     const domainHelp = form.querySelector('[data-domain-help]');
+    const domainBenefits = form.querySelector('[data-domain-benefits]');
+    const continueButton = form.querySelector('[data-checkout-continue]');
     const billingInputs = [...form.querySelectorAll('input[name="billing_cycle"]')];
+    const planInputs = [...form.querySelectorAll('input[name="hosting_plan"]')];
+    const domainPricing = parseJsonData(form.dataset.domainPricing, {});
+    const websitePackage = parseJsonData(form.dataset.websitePackage, {
+        title: 'Bespoke Website Development',
+        price: '199.00',
+    });
 
     const update = () => {
         const type = form.querySelector('input[name="order_type"]:checked')?.value || 'bundle';
@@ -58,6 +78,10 @@ function initCheckoutForm(form) {
 
         if (hostingSection) {
             hostingSection.hidden = !usesHosting;
+        }
+
+        if (domainBenefits) {
+            domainBenefits.hidden = isHostingOnly;
         }
 
         if (domainInput) {
@@ -81,19 +105,23 @@ function initCheckoutForm(form) {
             if (isHostingOnly) {
                 domainHelp.textContent = 'Optional. Add the domain you want this hosting account linked to, or leave blank and provide it later.';
             } else if (isDomainOnly) {
-                domainHelp.textContent = 'This domain will be registered through WHMCS after checkout creates your invoice.';
+                domainHelp.textContent = 'This domain will be checked again before your secure payment is created.';
             } else if (type === 'website') {
-                domainHelp.textContent = 'Enter the domain you want for the website package. It will be checked server-side where domain registration is included.';
+                domainHelp.textContent = 'Enter the domain you want for the website package. Domain registration is included for the first year where available.';
             } else {
-                domainHelp.textContent = 'This domain will be checked again server-side before the WHMCS order is created.';
+                domainHelp.textContent = 'This domain will be checked again before your secure payment is created.';
             }
         }
 
         updateCheckoutSteps(form);
+        updateOrderSummary(form, domainPricing, websitePackage);
     };
 
     typeInputs.forEach((input) => input.addEventListener('change', update));
     billingInputs.forEach((input) => input.addEventListener('change', update));
+    planInputs.forEach((input) => input.addEventListener('change', update));
+    domainInput?.addEventListener('input', update);
+    continueButton?.addEventListener('click', () => focusNextCheckoutSection(form, continueButton));
     update();
 }
 
@@ -148,18 +176,18 @@ function renderDomainResults(root, data) {
     const messageText = !availabilityChecked
         ? 'Live WHMCS availability must be confirmed before you can order this domain. Please try again shortly.'
         : available
-            ? 'Secure it now or bundle it with cloud hosting.'
+            ? 'Secure it now or start a complete website package with the domain included.'
             : 'The exact match is taken, but these alternatives may still work for your business.';
 
     root.innerHTML = `
-        <div class="domain-result-message ${available ? 'is-available' : 'is-unavailable'}">
+        <div class="domain-result-message ${available ? 'is-available' : 'is-unavailable'}" role="status">
             <span>${badgeText}</span>
             <h2>${headline}</h2>
             <p>${messageText}</p>
         </div>
         <div class="domain-feature-grid">
             ${renderExactDomainCard(match)}
-            ${renderHostingBundleCard(match, data.hosting_pid)}
+            ${renderWebsitePackageCard(match)}
         </div>
         <div class="domain-options-card">
             <div class="section-head compact">
@@ -189,30 +217,47 @@ function renderExactDomainCard(item) {
         <article class="domain-result-card exact-card">
             <div class="card-topline">${badge}<span>${escapeHtml(item.tld)}</span></div>
             <h3>${escapeHtml(item.domain)}</h3>
-            <p>${available ? 'Exact match domain ready for main-site checkout and WHMCS-backed billing.' : unavailableDomainText(item)}</p>
+            <p>${available ? 'Exact match domain ready for secure checkout.' : unavailableDomainText(item)}</p>
             <div class="domain-price">${price}<small>/yr</small></div>
             ${button}
         </article>
     `;
 }
 
-function renderHostingBundleCard(item, hostingPid) {
-    const disabled = item.available !== true || !hostingPid || hostingPid === 'HOSTING_PID_HERE';
-    const button = disabled
-        ? '<button class="btn btn-light" type="button" disabled>Hosting bundle unavailable</button>'
-        : `<a class="btn btn-primary" href="${escapeAttr(item.bundle_checkout_url || item.hosting_url)}">Get domain + hosting</a>`;
+function renderWebsitePackageCard(item) {
+    const packageInfo = item.website_package || {};
+    const packageTitle = packageInfo.title || 'Bespoke Website Development';
+    const packageDescription = packageInfo.description || 'Launch a professional business website with domain, hosting setup, Elementor, premium Envato elements, stock photos, content writing and Cloudflare integration included.';
+    const packagePrice = packageInfo.price || '199.00';
+    const packageCta = packageInfo.cta_text || 'Get Complete Website Package';
+    const packageFeatures = Array.isArray(packageInfo.features) && packageInfo.features.length
+        ? packageInfo.features
+        : [
+            'Free domain and hosting for 1 year',
+            'Free Elementor',
+            'Free Envato premium elements',
+            'Free stock photos',
+            'Free premium content writing',
+            'Free Cloudflare integration',
+            'Free SSL setup',
+            'Free domain and hosting setup support',
+        ];
+    const checkoutUrl = item.website_checkout_url || `/checkout?type=website${item.available === true ? `&domain=${encodeURIComponent(item.domain)}` : ''}`;
+    const domainNote = item.available === true
+        ? `${escapeHtml(item.domain)} can be included with your website package.`
+        : 'Start the website package and choose an available domain at checkout.';
 
     return `
         <article class="domain-result-card bundle-card">
-            <div class="card-topline"><span class="result-badge best">Best value</span><span>Cloud hosting</span></div>
-            <h3>${escapeHtml(item.domain)} + Cloud Hosting</h3>
-            <p>Register your domain with a hosting plan, cPanel access, SSL and Cloudflare CDN support.</p>
+            <div class="card-topline"><span class="result-badge best">Best Value</span><span>Website package</span></div>
+            <h3>${escapeHtml(packageTitle)}</h3>
+            <p>${escapeHtml(packageDescription)}</p>
+            <div class="domain-price"><strong>${formatPackagePrice(packagePrice)}</strong><small>one-time</small></div>
             <ul class="feature-list">
-                <li>Free SSL setup</li>
-                <li>cPanel hosting</li>
-                <li>Cloudflare CDN support</li>
+                ${packageFeatures.slice(0, 9).map((feature) => `<li>${escapeHtml(feature)}</li>`).join('')}
             </ul>
-            ${button}
+            <p class="package-note">${domainNote}</p>
+            <a class="btn btn-primary" href="${escapeAttr(checkoutUrl)}">${escapeHtml(packageCta)}</a>
         </article>
     `;
 }
@@ -249,7 +294,7 @@ function unavailableDomainText(item) {
 
 function renderDomainError(root, message) {
     root.innerHTML = `
-        <div class="domain-error">
+        <div class="domain-error" role="alert">
             <h2>Domain search unavailable</h2>
             <p>${escapeHtml(message)}</p>
         </div>
@@ -275,4 +320,200 @@ function escapeHtml(value) {
 
 function escapeAttr(value) {
     return escapeHtml(value);
+}
+
+function updateOrderSummary(form, domainPricing, websitePackage) {
+    const summary = form.querySelector('[data-order-summary]');
+    const lines = form.querySelector('[data-summary-lines]');
+    if (!summary || !lines) {
+        return;
+    }
+
+    const type = form.querySelector('input[name="order_type"]:checked')?.value || 'bundle';
+    const billingCycle = form.querySelector('input[name="billing_cycle"]:checked')?.value || 'monthly';
+    const domain = normaliseDomainValue(form.querySelector('input[name="domain"]')?.value || '');
+    const plan = selectedPlanData(form);
+    const websitePrice = parseMoney(websitePackage.price || '199.00');
+    const registersDomain = ['domain', 'bundle', 'website'].includes(type);
+    const usesHosting = ['hosting', 'bundle'].includes(type);
+    const isWebsite = type === 'website';
+    const domainPrice = registersDomain && domain ? priceForDomain(domain, domainPricing) : 0;
+    const domainCharge = registersDomain && !isWebsite ? domainPrice : 0;
+    const hostingToday = usesHosting ? (billingCycle === 'annually' ? plan.yearly : plan.monthly) : 0;
+    const monthlyRecurring = usesHosting && billingCycle === 'monthly' ? plan.monthly : 0;
+    const yearlyHostingRecurring = usesHosting && billingCycle === 'annually' ? plan.yearly : 0;
+    const yearlyDomainRenewal = registersDomain && domain ? domainPrice : 0;
+    const todayPayment = (isWebsite ? websitePrice : 0) + domainCharge + hostingToday;
+
+    const packageTitle = {
+        domain: 'Domain Registration',
+        hosting: 'Hosting Package',
+        bundle: 'Domain + Hosting',
+        website: websitePackage.title || 'Bespoke Website Development',
+    }[type] || 'Selected Package';
+
+    const rows = [
+        summaryRow('Selected Package', packageTitle, packagePriceText(type, websitePrice, hostingToday, billingCycle)),
+    ];
+
+    if (domain) {
+        const domainText = isWebsite
+            ? 'Free for the first year with your website package'
+            : registersDomain
+                ? `${formatMoney(domainPrice)} / year`
+                : 'Existing domain, no registration charge';
+        rows.push(summaryRow('Domain', domain, domainText));
+    } else if (registersDomain) {
+        rows.push(summaryRow('Domain', 'Choose your domain', isWebsite ? 'Included for first year when available' : 'Price shown after domain entry'));
+    }
+
+    if (isWebsite) {
+        rows.push(summaryRow('Hosting', 'Included hosting setup', 'Free for 1 year'));
+    } else if (usesHosting) {
+        rows.push(summaryRow('Hosting', plan.title || 'Selected hosting', billingCycle === 'annually' ? `${formatMoney(plan.yearly)} / year` : `${formatMoney(plan.monthly)} / month`));
+    }
+
+    if (isWebsite) {
+        rows.push(`
+            <div class="summary-row summary-addons">
+                <span>Optional Add-ons</span>
+                <ul>
+                    <li>Cloudflare Integration <strong>Free</strong></li>
+                    <li>Premium Content Writing <strong>Free</strong></li>
+                    <li>Stock Photos <strong>Free</strong></li>
+                    <li>Elementor Setup <strong>Free</strong></li>
+                    <li>Envato Premium Elements <strong>Free</strong></li>
+                </ul>
+            </div>
+        `);
+    }
+
+    lines.innerHTML = rows.join('');
+    form.querySelector('[data-summary-subtotal]').textContent = subtotalText(type, {
+        websitePrice,
+        domainCharge,
+        domainPrice,
+        hostingToday,
+        monthlyRecurring,
+        yearlyHostingRecurring,
+        billingCycle,
+        isWebsite,
+        registersDomain,
+        usesHosting,
+    });
+    form.querySelector('[data-summary-today]').textContent = formatMoney(todayPayment);
+    form.querySelector('[data-summary-monthly]').textContent = `${formatMoney(monthlyRecurring)}/month`;
+    form.querySelector('[data-summary-yearly-hosting]').textContent = `${formatMoney(yearlyHostingRecurring)}/year`;
+    form.querySelector('[data-summary-yearly]').textContent = isWebsite && domain
+        ? `${formatMoney(yearlyDomainRenewal)}/year after first year`
+        : `${formatMoney(yearlyDomainRenewal)}/year`;
+}
+
+function selectedPlanData(form) {
+    const selected = form.querySelector('input[name="hosting_plan"]:checked')?.closest('[data-plan-title]');
+    const monthly = parseMoney(selected?.dataset.planMonthly || '0');
+    let yearly = parseMoney(selected?.dataset.planYearly || '0');
+    if (yearly <= 0 && monthly > 0) {
+        yearly = monthly * 12;
+    }
+
+    return {
+        title: selected?.dataset.planTitle || 'Starter Hosting',
+        monthly,
+        yearly,
+    };
+}
+
+function summaryRow(label, title, meta) {
+    return `
+        <div class="summary-row">
+            <span>${escapeHtml(label)}</span>
+            <strong>${escapeHtml(title)}</strong>
+            <small>${escapeHtml(meta)}</small>
+        </div>
+    `;
+}
+
+function packagePriceText(type, websitePrice, hostingToday, billingCycle) {
+    if (type === 'website') {
+        return `${formatPackagePrice(websitePrice)} one-time`;
+    }
+    if (type === 'hosting') {
+        return billingCycle === 'annually' ? `${formatMoney(hostingToday)} / year` : `${formatMoney(hostingToday)} / month`;
+    }
+    if (type === 'domain') {
+        return 'Domain registration only';
+    }
+
+    return 'Domain registration with hosting';
+}
+
+function subtotalText(type, values) {
+    const parts = [];
+    if (type === 'website') {
+        parts.push(`${formatPackagePrice(values.websitePrice)} one-time website package`);
+        if (values.registersDomain) {
+            parts.push('domain included first year');
+        }
+        parts.push('hosting included first year');
+    } else {
+        if (values.domainCharge > 0) {
+            parts.push(`${formatMoney(values.domainCharge)} domain`);
+        }
+        if (values.usesHosting) {
+            parts.push(values.billingCycle === 'annually'
+                ? `${formatMoney(values.hostingToday)} yearly hosting`
+                : `${formatMoney(values.hostingToday)} first month hosting`);
+        }
+    }
+
+    return parts.length ? parts.join(' + ') : 'No billable item selected yet';
+}
+
+function priceForDomain(domain, pricing) {
+    const lower = domain.toLowerCase();
+    const tld = Object.keys(pricing || {})
+        .sort((a, b) => b.length - a.length)
+        .find((key) => lower.endsWith(key.toLowerCase()));
+    if (!tld) {
+        return 0;
+    }
+
+    return parseMoney(pricing[tld]?.price || '0');
+}
+
+function parseMoney(value) {
+    const number = Number(String(value ?? '').replace(/[^0-9.]/g, ''));
+    return Number.isFinite(number) ? number : 0;
+}
+
+function formatMoney(value) {
+    return `£${Number(value || 0).toFixed(2)}`;
+}
+
+function formatPackagePrice(value) {
+    const amount = parseMoney(value);
+    return Number.isInteger(amount) ? `£${amount.toFixed(0)}` : formatMoney(amount);
+}
+
+function normaliseDomainValue(value) {
+    return String(value || '').trim().toLowerCase();
+}
+
+function parseJsonData(value, fallback) {
+    try {
+        return value ? JSON.parse(value) : fallback;
+    } catch (error) {
+        return fallback;
+    }
+}
+
+function focusNextCheckoutSection(form, button) {
+    const sections = [...form.querySelectorAll('[data-checkout-section]')].filter((section) => !section.hidden);
+    const current = button.closest('[data-checkout-section]');
+    const index = sections.indexOf(current);
+    const next = sections[index + 1];
+    const target = next?.querySelector('input:not([type="hidden"]), select, textarea, button, a[href]');
+    target?.focus({ preventScroll: true });
+    next?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }

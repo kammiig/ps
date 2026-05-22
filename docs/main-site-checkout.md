@@ -50,6 +50,7 @@ WHMCS_BUSINESS_HOSTING_PID=2
 WHMCS_WORDPRESS_HOSTING_PID=3
 WHMCS_RESELLER_HOSTING_PID=4
 WHMCS_WEBSITE_PACKAGE_PID=5
+WHMCS_WEBSITE_PRICE_OVERRIDE=199.00
 WHMCS_WEBSITE_REGISTER_DOMAIN=true
 WHMCS_WEBSITE_DOMAIN_PRICE_OVERRIDE=0.00
 ```
@@ -67,7 +68,7 @@ Domain display fallback pricing and registration periods are in `app/config/whmc
 ]
 ```
 
-Checkout does not trust frontend prices. WHMCS creates the actual invoice and pricing, except when the website package uses the server-side `domain_price_override` setting for a free first-year domain.
+Checkout does not trust frontend prices. WHMCS creates the actual invoice and pricing, except when the website package uses the server-side `price_override` setting for the £199 package price and `domain_price_override` for a free first-year domain.
 
 ## Setup Steps
 
@@ -128,10 +129,10 @@ These shortcodes send visitors to the main website checkout. They do not store W
 - Search `example.com` from the homepage and confirm it lands on `/domain-search`.
 - Confirm `/api/domain-search?domain=example.com` returns JSON and no credentials.
 - Click `Get domain` and confirm `/checkout?type=domain&domain=example.com`.
-- Click `Get domain + hosting` and confirm `/checkout?type=bundle&domain=example.com`.
+- Click `Get Complete Website Package` and confirm `/checkout?type=website&domain=example.com` when the domain is available.
 - Submit a domain-only test order and confirm WHMCS creates a client, order and invoice.
 - Submit hosting-only with an existing domain.
 - Submit domain + hosting.
-- Submit the £200 website package.
+- Submit the £199 website package.
 - Confirm unpaid orders are not provisioned until WHMCS payment/approval automation handles them.
 - Check `storage/logs/whmcs-api.log` for safe error messages if an API call fails.

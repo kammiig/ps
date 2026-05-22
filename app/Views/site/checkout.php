@@ -12,28 +12,37 @@ $domainLabel = $isHostingOnly ? 'Existing domain name (optional)' : 'Domain name
 $domainHelp = $isHostingOnly
     ? 'Optional. Add the domain you want this hosting account linked to, or leave blank and provide it later.'
     : ($isDomainOnly
-        ? 'This domain will be registered through WHMCS after checkout creates your invoice.'
+        ? 'This domain will be checked again before your secure payment is created.'
         : ($orderType === 'website'
-            ? 'Enter the domain you want for the website package. It will be checked server-side where domain registration is included.'
-            : 'This domain will be checked again server-side before the WHMCS order is created.'));
+            ? 'Enter the domain you want for the website package. Domain registration is included for the first year where available.'
+            : 'This domain will be checked again before your secure payment is created.'));
 $countries = ['GB' => 'United Kingdom', 'US' => 'United States', 'PK' => 'Pakistan', 'IE' => 'Ireland', 'CA' => 'Canada', 'AU' => 'Australia'];
-$websitePid = (int) (($checkoutConfig['website_package']['pid'] ?? 0));
+$websiteConfig = $checkoutConfig['website_package'] ?? [];
+$websitePriceRaw = (string) ($websiteConfig['price_override'] ?? $package['price'] ?? '199.00');
+$websitePriceNumber = preg_replace('/[^0-9.]/', '', $websitePriceRaw) ?: '199.00';
+$websitePackageSummary = [
+    'title' => (string) (($package['title'] ?? '') ?: 'Bespoke Website Development'),
+    'price' => number_format((float) $websitePriceNumber, 2, '.', ''),
+    'description' => (string) (($package['description'] ?? '') ?: 'Launch a professional business website with domain, hosting setup, Elementor, premium Envato elements, stock photos, content writing and Cloudflare integration included.'),
+];
+$domainPricingJson = e(json_encode($checkoutConfig['domain_pricing'] ?? [], JSON_UNESCAPED_SLASHES));
+$websitePackageJson = e(json_encode($websitePackageSummary, JSON_UNESCAPED_SLASHES));
 ?>
 <section class="checkout-page">
     <div class="container">
         <div class="checkout-head">
             <span class="section-kicker">Secure website checkout</span>
             <h1>Order Domains, Hosting and Website Packages</h1>
-            <p>Your order is placed on the Planetic Solutions website and securely sent to WHMCS for billing, invoices, provisioning and client records.</p>
+            <p>Choose your domain, hosting or complete website package, review your live order summary and continue to secure payment.</p>
         </div>
 
         <?php if ($errors): ?>
-            <div class="notice error checkout-notice">
+            <div class="notice error checkout-notice" role="alert">
                 <?php foreach ($errors as $error): ?><p><?= e($error) ?></p><?php endforeach; ?>
             </div>
         <?php endif; ?>
 
-        <form class="checkout-layout" action="<?= e(url('/checkout')) ?>" method="post" data-checkout-form>
+        <form class="checkout-layout" action="<?= e(url('/checkout')) ?>" method="post" data-checkout-form data-domain-pricing="<?= $domainPricingJson ?>" data-website-package="<?= $websitePackageJson ?>">
             <input type="hidden" name="_csrf" value="<?= e($csrfToken) ?>">
 
             <div class="checkout-main">
@@ -49,7 +58,7 @@ $websitePid = (int) (($checkoutConfig['website_package']['pid'] ?? 0));
                             'domain' => ['Domain only', 'Register a new domain name.'],
                             'hosting' => ['Hosting only', 'Use an existing domain with hosting.'],
                             'bundle' => ['Domain + hosting', 'Register a domain with a hosting package.'],
-                            'website' => ['£200 website', 'Complete business website package.'],
+                            'website' => ['Bespoke Website Development', '£199 one-time package with first-year domain and hosting included.'],
                         ] as $value => [$title, $text]): ?>
                             <label class="checkout-choice">
                                 <input type="radio" name="order_type" value="<?= e($value) ?>" <?= $orderType === $value ? 'checked' : '' ?>>
@@ -71,9 +80,21 @@ $websitePid = (int) (($checkoutConfig['website_package']['pid'] ?? 0));
                     </div>
                     <label>
                         <span data-domain-label><?= e($domainLabel) ?></span>
-                        <input name="domain" type="text" inputmode="url" autocomplete="off" placeholder="<?= $isHostingOnly ? 'your-existing-domain.com' : 'example.com' ?>" value="<?= e($domain) ?>" <?= $isHostingOnly ? '' : 'required' ?>>
+                        <input name="domain" type="text" inputmode="url" autocomplete="off" placeholder="<?= $isHostingOnly ? 'your-existing-domain.com' : 'example.com' ?>" value="<?= e($domain) ?>" aria-describedby="checkout-domain-help" <?= $isHostingOnly ? '' : 'required' ?>>
                     </label>
-                    <p class="checkout-help" data-domain-help><?= e($domainHelp) ?></p>
+                    <p id="checkout-domain-help" class="checkout-help" data-domain-help><?= e($domainHelp) ?></p>
+                    <div class="domain-benefits-card" data-domain-benefits <?= $isHostingOnly ? 'hidden' : '' ?>>
+                        <h3>Great to know</h3>
+                        <ul>
+                            <li><?= icon('check') ?> Free WHOIS privacy protection where available</li>
+                            <li><?= icon('check') ?> 1 year domain registration</li>
+                            <li><?= icon('check') ?> 24/7 customer support</li>
+                            <li><?= icon('check') ?> ICANN fee included in price where applicable</li>
+                            <li><?= icon('check') ?> Secure SSL encrypted payment</li>
+                        </ul>
+                        <p>You’re getting your own custom domain, a great way to brand your website or business.</p>
+                        <button class="btn btn-primary" type="button" data-checkout-continue>Continue</button>
+                    </div>
                 </section>
 
                 <section class="checkout-panel" data-checkout-section="hosting" <?= $usesHosting ? '' : 'hidden' ?>>
@@ -96,14 +117,13 @@ $websitePid = (int) (($checkoutConfig['website_package']['pid'] ?? 0));
                     <div class="checkout-plan-list">
                         <?php foreach ($plans as $plan): ?>
                             <?php $yearlyPrice = trim((string) ($plan['yearly_price'] ?? '')); ?>
-                            <label class="checkout-plan">
+                            <label class="checkout-plan" data-plan-title="<?= e($plan['title']) ?>" data-plan-monthly="<?= e(preg_replace('/[^0-9.]/', '', (string) $plan['monthly_price'])) ?>" data-plan-yearly="<?= e(preg_replace('/[^0-9.]/', '', (string) ($plan['yearly_price'] ?? ''))) ?>">
                                 <input type="radio" name="hosting_plan" value="<?= e($plan['slug']) ?>" <?= $selectedPlan === $plan['slug'] ? 'checked' : '' ?>>
                                 <span>
                                     <strong><?= e($plan['title']) ?></strong>
                                     <small>
                                         <span class="plan-price-monthly"><?= e(money($plan['monthly_price'])) ?>/month</span>
                                         <span class="plan-price-yearly"><?= $yearlyPrice !== '' ? e(money($yearlyPrice)) . '/year' : 'Yearly price not set' ?></span>
-                                        · PID <?= e($plan['checkout_pid'] ?: 'not set') ?>
                                     </small>
                                 </span>
                             </label>
@@ -141,19 +161,19 @@ $websitePid = (int) (($checkoutConfig['website_package']['pid'] ?? 0));
             </div>
 
             <aside class="checkout-summary">
-                <div class="checkout-summary-card">
+                <div class="checkout-summary-card" data-order-summary aria-live="polite" aria-atomic="true">
                     <span class="section-kicker">Order summary</span>
-                    <h2>Main-site checkout</h2>
-                    <ul class="feature-list">
-                        <li><?= icon('check') ?> WHMCS client created or matched by email</li>
-                        <li><?= icon('check') ?> WHMCS order and invoice created server-side</li>
-                        <li><?= icon('check') ?> Prices and product IDs resolved server-side</li>
-                        <li><?= icon('check') ?> Provisioning remains handled by WHMCS after payment</li>
-                    </ul>
-                    <?php if ($websitePid > 0): ?>
-                        <p class="checkout-help">Website package product ID: <strong><?= e($websitePid) ?></strong></p>
-                    <?php endif; ?>
-                    <button class="btn btn-primary" type="submit">Create Order &amp; Pay Invoice <?= icon('arrow') ?></button>
+                    <h2>Order Summary</h2>
+                    <div class="order-summary-lines" data-summary-lines></div>
+                    <div class="order-summary-totals">
+                        <div><span>Subtotal</span><strong data-summary-subtotal>£0.00</strong></div>
+                        <div><span>Today’s Payment</span><strong data-summary-today>£0.00</strong></div>
+                        <div><span>Monthly Recurring</span><strong data-summary-monthly>£0.00/month</strong></div>
+                        <div><span>Yearly Hosting Renewal</span><strong data-summary-yearly-hosting>£0.00/year</strong></div>
+                        <div><span>Yearly Domain Renewal</span><strong data-summary-yearly>£0.00/year</strong></div>
+                    </div>
+                    <p class="checkout-help">Secure SSL encrypted payment. Your invoice and service management remain available in your client area.</p>
+                    <button class="btn btn-primary" type="submit">Continue to Payment <?= icon('arrow') ?></button>
                     <a class="btn btn-outline" href="<?= e($whmcs->clientAreaUrl()) ?>">Existing Client Login</a>
                 </div>
             </aside>
