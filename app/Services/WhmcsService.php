@@ -271,6 +271,36 @@ final class WhmcsService
         return ['ok' => true, 'invoice' => $decoded];
     }
 
+    public function invoiceForClient(int $invoiceId, int $clientId): array
+    {
+        $invoice = $this->invoice($invoiceId);
+        if ($invoice['ok']) {
+            return $invoice;
+        }
+
+        $invoices = $this->invoicesForClient($clientId);
+        if (!$invoices['ok']) {
+            return [
+                'ok' => false,
+                'message' => $invoice['message'] ?? $invoices['message'] ?? 'Unable to load invoice.',
+            ];
+        }
+
+        foreach ($invoices['invoices'] as $clientInvoice) {
+            $candidateId = (int) ($clientInvoice['id'] ?? $clientInvoice['invoiceid'] ?? 0);
+            if ($candidateId === $invoiceId) {
+                $clientInvoice['invoiceid'] = $clientInvoice['invoiceid'] ?? $candidateId;
+                $clientInvoice['userid'] = $clientInvoice['userid'] ?? $clientId;
+                return ['ok' => true, 'invoice' => $clientInvoice, 'fallback' => true];
+            }
+        }
+
+        return [
+            'ok' => false,
+            'message' => 'Unable to load invoice.',
+        ];
+    }
+
     public function invoicesForClient(int $clientId): array
     {
         $decoded = $this->callApi([

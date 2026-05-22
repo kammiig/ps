@@ -379,7 +379,7 @@ final class SiteController extends Controller
             return $this->checkout(['Order created, but an invoice reference was not returned. Please contact support.'], $data);
         }
 
-        $invoice = $this->whmcs->invoice((int) $order['invoice_id']);
+        $invoice = $this->whmcs->invoiceForClient((int) $order['invoice_id'], (int) $client['client_id']);
         if (!$invoice['ok']) {
             return $this->checkout(['Your order was created, but the secure payment amount could not be loaded. Please contact support.'], $data);
         }

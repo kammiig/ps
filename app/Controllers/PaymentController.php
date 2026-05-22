@@ -131,7 +131,7 @@ final class PaymentController extends Controller
         }
         RateLimiter::hit('payment_intent', $identifier, 300);
 
-        $invoice = $this->whmcs->invoice((int) $invoiceId);
+        $invoice = $this->whmcs->invoiceForClient((int) $invoiceId, $whmcsClientId);
         if (!$invoice['ok'] || !$this->invoiceBelongsToClient($invoice['invoice'], $whmcsClientId)) {
             $this->redirect(url('/account/billing'));
         }
@@ -280,7 +280,7 @@ final class PaymentController extends Controller
 
     private function refreshInvoiceAmount(array $order): array
     {
-        $invoice = $this->whmcs->invoice((int) $order['whmcs_invoice_id']);
+        $invoice = $this->whmcs->invoiceForClient((int) $order['whmcs_invoice_id'], (int) $order['whmcs_client_id']);
         if (!$invoice['ok']) {
             return ['ok' => false, 'message' => 'The invoice could not be loaded for secure payment. Please try again shortly.'];
         }
