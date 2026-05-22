@@ -2,8 +2,8 @@
     <div class="container page-hero-grid">
         <div>
             <span class="section-kicker">Domain registration</span>
-            <h1>Search and Register Domains Through WHMCS</h1>
-            <p>Use the domain search below to check availability on this website, then continue through our main-site checkout while WHMCS handles billing and domain records behind the scenes.</p>
+            <h1>Search and Register Domains</h1>
+            <p>Use the domain search below to check availability on this website, then continue through secure checkout and manage everything from your Planetic Solutions account.</p>
             <?php $id = 'domain-page-search'; require APP_PATH . '/Views/partials/domain-search.php'; ?>
         </div>
         <aside class="page-hero-card">
@@ -22,7 +22,7 @@
         <div class="section-head">
             <div>
                 <span class="section-kicker">Popular extensions</span>
-                <h2>Display prices with WHMCS-backed checkout</h2>
+                <h2>Popular domain prices</h2>
             </div>
         </div>
         <div class="tld-grid">
@@ -30,7 +30,7 @@
                 <article>
                     <h3><?= e($tld['extension']) ?></h3>
                     <strong><?= e($tld['price']) ?></strong>
-                    <p>Registration prices are confirmed at checkout using WHMCS rates.</p>
+                    <p>Registration prices are confirmed securely at checkout.</p>
                     <a class="btn btn-outline" href="<?= e(url('/domain-search')) ?>">Search <?= e($tld['extension']) ?></a>
                 </article>
             <?php endforeach; ?>
@@ -40,9 +40,9 @@
 
 <section class="section muted">
     <div class="container feature-grid">
-        <article><div class="icon-pill"><?= icon('globe') ?></div><h3>Domain search</h3><p>Show custom availability results first, then send visitors into the WHMCS registration flow when they choose a domain.</p></article>
-        <article><div class="icon-pill"><?= icon('shield') ?></div><h3>Billing handled in WHMCS</h3><p>Orders, renewals, invoices and client account management remain in the WHMCS client area.</p></article>
-        <article><div class="icon-pill"><?= icon('panel') ?></div><h3>Editable TLD cards</h3><p>Update displayed extensions, fallback prices and WHMCS URLs in the admin dashboard.</p></article>
+        <article><div class="icon-pill"><?= icon('globe') ?></div><h3>Domain search</h3><p>Show custom availability results first, then continue through the on-site registration flow when you choose a domain.</p></article>
+        <article><div class="icon-pill"><?= icon('shield') ?></div><h3>Simple account billing</h3><p>Orders, renewals, invoices and services are available from your Planetic Solutions account.</p></article>
+        <article><div class="icon-pill"><?= icon('panel') ?></div><h3>Editable TLD cards</h3><p>Update displayed extensions and fallback prices in the admin dashboard.</p></article>
     </div>
 </section>
 

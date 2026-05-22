@@ -6,7 +6,10 @@ namespace App\Controllers;
 
 use App\Core\Controller;
 use App\Core\Csrf;
+use App\Core\CustomerAuth;
 use App\Models\ContentRepository;
+use App\Models\CustomerRepository;
+use App\Models\PaymentRepository;
 use App\Services\Mailer;
 use App\Services\RecaptchaService;
 use App\Services\WhmcsService;
@@ -37,7 +40,7 @@ final class SiteController extends Controller
             'services' => $this->rowsFromSetting('home_service_cards', [
                 ['WordPress Hosting', 'Fast WordPress-ready hosting with SSL, cPanel and one-click installs.', 'panel', '/wordpress-hosting'],
                 ['cPanel Hosting', 'Reliable business hosting with email, databases and simple management.', 'cloud', '/hosting'],
-                ['Reseller Hosting', 'Sell hosting under your own brand with WHMCS-ready order links.', 'globe', '/hosting#reseller-hosting'],
+                ['Reseller Hosting', 'Sell hosting under your own brand with clean order links.', 'globe', '/hosting#reseller-hosting'],
                 ['Domain Registration', 'Search and register domains through the main website checkout.', 'shield', '/domains'],
                 ['Website Development', 'Complete business websites delivered fast with hosting setup included.', 'code', '/website-development'],
                 ['Cloudflare CDN Setup', 'Performance and security tuning with Cloudflare CDN configuration.', 'bolt', '/contact'],
@@ -45,7 +48,7 @@ final class SiteController extends Controller
             'trustBadges' => $this->rowsFromSetting('home_trust_badges', [
                 ['Free SSL', 'Secure every eligible hosting plan.'],
                 ['cPanel Hosting', 'Familiar website and email control.'],
-                ['WHMCS Billing', 'Orders, renewals and invoices handled.'],
+                ['Easy Billing', 'Orders, renewals and invoices handled.'],
                 ['Cloudflare CDN', 'Performance and security setup support.'],
                 ['48h Website Delivery', 'Fast delivery for the website package.'],
                 ['UK-focused Support', 'Professional support messaging for businesses.'],
@@ -56,7 +59,7 @@ final class SiteController extends Controller
                 ['WordPress Ready', 'Install WordPress quickly, connect Elementor-friendly tooling and manage updates through a simple control panel.', 'panel'],
                 ['Free Website Migration', 'Move from another provider with practical migration support and minimum disruption to your business.', 'cloud'],
                 ['SEO Ready Hosting', 'Clean performance foundations, HTTPS, schema-ready pages and editable metadata built into the website.', 'globe'],
-                ['Business Support', 'Clear support pathways through WHMCS, contact forms and direct service inquiry flows.', 'mail'],
+                ['Business Support', 'Clear support pathways through account billing, contact forms and direct service inquiry flows.', 'mail'],
             ]),
             'schemas' => [
                 $this->faqSchema($faqs),
@@ -133,7 +136,7 @@ final class SiteController extends Controller
             'faqs' => $faqs,
             'schemas' => [
                 $this->faqSchema($faqs),
-                $this->serviceSchema('Domain Registration', 'Domain search and registration on the main website with WHMCS-backed billing.'),
+                $this->serviceSchema('Domain Registration', 'Domain search and registration on the main website with secure account billing.'),
             ],
             'breadcrumbs' => [
                 ['name' => 'Home', 'url' => url('/')],
@@ -297,7 +300,7 @@ final class SiteController extends Controller
             ],
             'metaOverride' => [
                 'title' => 'Checkout | Planetic Solutions',
-                'description' => 'Order domains, hosting and website development through the Planetic Solutions website with WHMCS-backed billing.',
+                'description' => 'Order domains, hosting and website development through the Planetic Solutions website with secure account billing.',
             ],
         ]));
     }
@@ -306,10 +309,10 @@ final class SiteController extends Controller
     {
         $message = strtolower($message);
         if (str_contains($message, 'invalid ip') || str_contains($message, 'api access')) {
-            return 'Live WHMCS domain availability is blocked by WHMCS API IP access settings. Please contact support or try again shortly.';
+            return 'Live domain availability is temporarily blocked by the billing system. Please contact support or try again shortly.';
         }
 
-        return 'Live WHMCS domain availability could not be checked. Please try again shortly.';
+        return 'Live domain availability could not be checked. Please try again shortly.';
     }
 
     public function submitCheckout(): string
@@ -321,6 +324,11 @@ final class SiteController extends Controller
         [$data, $errors] = $this->validateCheckout($_POST);
         if ($errors) {
             return $this->checkout($errors, $data);
+        }
+
+        $customerPrecheck = $this->precheckCustomerAccount($data);
+        if (!$customerPrecheck['ok']) {
+            return $this->checkout([$customerPrecheck['message']], $data);
         }
 
         if ($this->orderRegistersDomain($data['order_type'])) {
@@ -351,7 +359,7 @@ final class SiteController extends Controller
         ]);
 
         if (!$client['ok']) {
-            return $this->checkout([$client['message'] ?? 'Unable to create or find the WHMCS client.'], $data);
+            return $this->checkout(['Unable to prepare your customer account. Please try again or contact support.'], $data);
         }
 
         $orderPayload = $this->buildWhmcsOrderPayload($data);
@@ -364,14 +372,44 @@ final class SiteController extends Controller
         ], $orderPayload['payload']));
 
         if (!$order['ok']) {
-            return $this->checkout([$order['message'] ?? 'Unable to create the WHMCS order.'], $data);
+            return $this->checkout(['Unable to create your order. Please try again or contact support.'], $data);
         }
 
-        if (!empty($order['invoice_id'])) {
-            $this->redirect($this->whmcs->invoiceUrl((int) $order['invoice_id']));
+        if (empty($order['invoice_id'])) {
+            return $this->checkout(['Order created, but an invoice reference was not returned. Please contact support.'], $data);
         }
 
-        return $this->checkout(['Order created, but WHMCS did not return an invoice ID. Please contact support.'], $data);
+        $invoice = $this->whmcs->invoice((int) $order['invoice_id']);
+        if (!$invoice['ok']) {
+            return $this->checkout(['Your order was created, but the secure payment amount could not be loaded. Please contact support.'], $data);
+        }
+
+        $invoiceData = $invoice['invoice'];
+        $invoiceClientId = $this->invoiceClientId($invoiceData);
+        if ($invoiceClientId > 0 && $invoiceClientId !== (int) $client['client_id']) {
+            return $this->checkout(['The invoice could not be matched to your account. Please contact support.'], $data);
+        }
+
+        $amount = $this->invoiceAmountDue($invoiceData);
+        if ($amount <= 0) {
+            return $this->checkout(['This invoice does not have a payable balance. Please contact support if this looks wrong.'], $data);
+        }
+
+        $customer = $this->customerForCheckout($data, (int) $client['client_id']);
+        if (!$customer['ok']) {
+            return $this->checkout([$customer['message']], $data);
+        }
+
+        $payment = (new PaymentRepository())->createOrUpdateOrder([
+            'customer_user_id' => (int) $customer['user']['id'],
+            'whmcs_client_id' => (int) $client['client_id'],
+            'whmcs_order_id' => (int) ($order['order_id'] ?? 0),
+            'whmcs_invoice_id' => (int) $order['invoice_id'],
+            'invoice_amount' => $amount,
+            'currency' => $this->invoiceCurrency($invoiceData),
+        ]);
+
+        $this->redirect(url('/checkout/payment/' . $payment['public_token']));
     }
 
     public function about(): string
@@ -588,7 +626,108 @@ final class SiteController extends Controller
             ],
             'schemas' => $schemas,
             'csrfToken' => Csrf::token(),
+            'customerUser' => (new CustomerAuth())->user(),
         ];
+    }
+
+    private function customerForCheckout(array $data, int $whmcsClientId): array
+    {
+        $auth = new CustomerAuth();
+        $customers = new CustomerRepository();
+        $current = $auth->user();
+
+        if ($current) {
+            $user = $customers->find((int) $current['id']);
+            if (!$user) {
+                return ['ok' => false, 'message' => 'Please log in again to continue.'];
+            }
+            if (!empty($user['whmcs_client_id']) && (int) $user['whmcs_client_id'] !== $whmcsClientId) {
+                return ['ok' => false, 'message' => 'This order could not be matched to your account. Please contact support.'];
+            }
+            $linked = $customers->setWhmcsClient((int) $user['id'], $whmcsClientId);
+            if (!$linked) {
+                return ['ok' => false, 'message' => 'This order could not be linked to your account. Please contact support.'];
+            }
+            $auth->login($linked);
+            return ['ok' => true, 'user' => $linked];
+        }
+
+        $existing = $customers->findByEmail($data['email']);
+        if ($existing) {
+            if (!password_verify($data['password'], $existing['password_hash'])) {
+                return ['ok' => false, 'message' => 'An account already exists for this email. Please log in before continuing.'];
+            }
+            if (!empty($existing['whmcs_client_id']) && (int) $existing['whmcs_client_id'] !== $whmcsClientId) {
+                return ['ok' => false, 'message' => 'This order could not be matched to your account. Please contact support.'];
+            }
+            $linked = $customers->setWhmcsClient((int) $existing['id'], $whmcsClientId) ?? $existing;
+            $auth->login($linked);
+            return ['ok' => true, 'user' => $linked];
+        }
+
+        $user = $customers->create([
+            'whmcs_client_id' => $whmcsClientId,
+            'first_name' => $data['first_name'],
+            'last_name' => $data['last_name'],
+            'email' => $data['email'],
+            'phone' => $data['phone'],
+            'address' => $data['address'],
+            'city' => $data['city'],
+            'state' => $data['state'],
+            'postcode' => $data['postcode'],
+            'country' => $data['country'],
+            'password' => $data['password'],
+        ]);
+        $auth->login($user);
+
+        return ['ok' => true, 'user' => $user];
+    }
+
+    private function precheckCustomerAccount(array $data): array
+    {
+        $auth = new CustomerAuth();
+        $current = $auth->user();
+        if ($current && strtolower((string) $current['email']) !== strtolower((string) $data['email'])) {
+            return ['ok' => false, 'message' => 'Please use the email address for your logged-in account, or log out before ordering for another customer.'];
+        }
+
+        if ($current) {
+            return ['ok' => true];
+        }
+
+        $existing = (new CustomerRepository())->findByEmail($data['email']);
+        if ($existing && !password_verify($data['password'], $existing['password_hash'])) {
+            return ['ok' => false, 'message' => 'An account already exists for this email. Please log in before continuing.'];
+        }
+
+        return ['ok' => true];
+    }
+
+    private function invoiceAmountDue(array $invoice): float
+    {
+        foreach (['balance', 'amountpaidremaining', 'total', 'subtotal'] as $key) {
+            if (isset($invoice[$key]) && is_numeric($invoice[$key]) && (float) $invoice[$key] > 0) {
+                return round((float) $invoice[$key], 2);
+            }
+        }
+
+        return 0.0;
+    }
+
+    private function invoiceCurrency(array $invoice): string
+    {
+        $currency = $invoice['currencycode'] ?? $invoice['currency'] ?? 'GBP';
+        if (is_array($currency)) {
+            $currency = $currency['code'] ?? $currency['suffix'] ?? 'GBP';
+        }
+
+        $currency = strtoupper(preg_replace('/[^A-Z]/i', '', (string) $currency) ?: 'GBP');
+        return strlen($currency) === 3 ? $currency : 'GBP';
+    }
+
+    private function invoiceClientId(array $invoice): int
+    {
+        return (int) ($invoice['userid'] ?? $invoice['clientid'] ?? $invoice['user_id'] ?? 0);
     }
 
     private function rowsFromSetting(string $key, array $fallback): array
@@ -721,7 +860,7 @@ final class SiteController extends Controller
             $plan = $this->checkoutPlanBySlug($data['hosting_plan']);
             $pid = (int) ($plan['checkout_pid'] ?? 0);
             if ($pid <= 0) {
-                return ['ok' => false, 'message' => 'Hosting product ID is not configured.'];
+                return ['ok' => false, 'message' => 'This hosting package is not ready for checkout yet.'];
             }
 
             $payload['pid'] = [$pid];
@@ -741,7 +880,7 @@ final class SiteController extends Controller
         $website = $config['website_package'] ?? [];
         $pid = (int) ($website['pid'] ?? 0);
         if ($pid <= 0) {
-            return ['ok' => false, 'message' => 'Website package product ID is not configured.'];
+            return ['ok' => false, 'message' => 'The website package is not ready for checkout yet.'];
         }
 
         $payload['pid'] = [$pid];

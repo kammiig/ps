@@ -256,6 +256,108 @@ final class WhmcsService
         ];
     }
 
+    public function invoice(int $invoiceId): array
+    {
+        $decoded = $this->callApi([
+            'action' => 'GetInvoice',
+            'invoiceid' => $invoiceId,
+            'responsetype' => 'json',
+        ]);
+
+        if (($decoded['result'] ?? '') !== 'success') {
+            return ['ok' => false, 'message' => $decoded['message'] ?? 'Unable to load invoice.'];
+        }
+
+        return ['ok' => true, 'invoice' => $decoded];
+    }
+
+    public function invoicesForClient(int $clientId): array
+    {
+        $decoded = $this->callApi([
+            'action' => 'GetInvoices',
+            'userid' => $clientId,
+            'responsetype' => 'json',
+        ]);
+
+        if (($decoded['result'] ?? '') !== 'success') {
+            return ['ok' => false, 'message' => $decoded['message'] ?? 'Unable to load invoices.'];
+        }
+
+        return [
+            'ok' => true,
+            'invoices' => $decoded['invoices']['invoice'] ?? [],
+        ];
+    }
+
+    public function productsForClient(int $clientId): array
+    {
+        $decoded = $this->callApi([
+            'action' => 'GetClientsProducts',
+            'clientid' => $clientId,
+            'responsetype' => 'json',
+        ]);
+
+        if (($decoded['result'] ?? '') !== 'success') {
+            return ['ok' => false, 'message' => $decoded['message'] ?? 'Unable to load services.'];
+        }
+
+        return [
+            'ok' => true,
+            'products' => $decoded['products']['product'] ?? [],
+        ];
+    }
+
+    public function domainsForClient(int $clientId): array
+    {
+        $decoded = $this->callApi([
+            'action' => 'GetClientsDomains',
+            'clientid' => $clientId,
+            'responsetype' => 'json',
+        ]);
+
+        if (($decoded['result'] ?? '') !== 'success') {
+            return ['ok' => false, 'message' => $decoded['message'] ?? 'Unable to load domains.'];
+        }
+
+        return [
+            'ok' => true,
+            'domains' => $decoded['domains']['domain'] ?? [],
+        ];
+    }
+
+    public function updateClient(int $clientId, array $client): array
+    {
+        $decoded = $this->callApi(array_merge([
+            'action' => 'UpdateClient',
+            'clientid' => $clientId,
+            'responsetype' => 'json',
+        ], $client));
+
+        if (($decoded['result'] ?? '') !== 'success') {
+            return ['ok' => false, 'message' => $decoded['message'] ?? 'Unable to update account details.'];
+        }
+
+        return ['ok' => true];
+    }
+
+    public function addInvoicePayment(int $invoiceId, string $transactionId, float $amount, string $gateway): array
+    {
+        $decoded = $this->callApi([
+            'action' => 'AddInvoicePayment',
+            'invoiceid' => $invoiceId,
+            'transid' => $transactionId,
+            'amount' => number_format($amount, 2, '.', ''),
+            'gateway' => $gateway,
+            'responsetype' => 'json',
+        ]);
+
+        if (($decoded['result'] ?? '') !== 'success') {
+            return ['ok' => false, 'message' => $decoded['message'] ?? 'Unable to record invoice payment.'];
+        }
+
+        return ['ok' => true, 'raw' => $decoded];
+    }
+
     public function acceptOrder(int $orderId): array
     {
         $decoded = $this->callApi([
@@ -300,6 +402,12 @@ final class WhmcsService
     public function paymentMethod(): string
     {
         return (string) ($this->settings['whmcs_payment_method'] ?? $this->config['payment_method'] ?? env('WHMCS_PAYMENT_METHOD', 'stripe'));
+    }
+
+    public function invoicePaymentGateway(): string
+    {
+        $configured = trim((string) ($this->settings['whmcs_payment_gateway_name'] ?? ''));
+        return $configured !== '' ? $configured : trim((string) env('WHMCS_PAYMENT_GATEWAY_NAME', ''));
     }
 
     private function callApi(array $params, bool $logErrors = true): array
@@ -481,7 +589,7 @@ final class WhmcsService
 
     private function canRetryApiAction(string $action): bool
     {
-        return in_array($action, ['DomainWhois', 'GetTLDPricing', 'GetProducts', 'GetClientsDetails'], true);
+        return in_array($action, ['DomainWhois', 'GetTLDPricing', 'GetProducts', 'GetClientsDetails', 'GetInvoice', 'GetInvoices', 'GetClientsProducts', 'GetClientsDomains'], true);
     }
 
     private function streamHttpStatus(array $headers): int

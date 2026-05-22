@@ -8,13 +8,17 @@ INSERT INTO settings (setting_key, setting_value, updated_at)
 VALUES ('whmcs_payment_method', 'stripe', NOW())
 ON DUPLICATE KEY UPDATE setting_value = IF(setting_value = '', VALUES(setting_value), setting_value), updated_at = NOW();
 
-UPDATE settings SET setting_value = 'Planetic Solutions provides reliable hosting, domain registration and complete business websites with WHMCS-powered billing, cPanel access and Cloudflare CDN support.', updated_at = NOW()
+INSERT INTO settings (setting_key, setting_value, updated_at)
+VALUES ('whmcs_payment_gateway_name', '', NOW())
+ON DUPLICATE KEY UPDATE setting_value = setting_value, updated_at = updated_at;
+
+UPDATE settings SET setting_value = 'Planetic Solutions provides reliable hosting, domain registration and complete business websites with secure on-site billing, cPanel access and Cloudflare CDN support.', updated_at = NOW()
 WHERE setting_key = 'home_hero_subtitle';
 
-UPDATE settings SET setting_value = 'WordPress Hosting|Fast WordPress-ready hosting with SSL, cPanel and one-click installs.|panel|/wordpress-hosting\ncPanel Hosting|Reliable business hosting with email, databases and simple management.|cloud|/hosting\nReseller Hosting|Sell hosting under your own brand with WHMCS-backed billing.|globe|/hosting#reseller-hosting\nDomain Registration|Search and register domains through the main website checkout.|shield|/domains\nWebsite Development|Complete business websites delivered fast with hosting setup included.|code|/website-development\nCloudflare CDN Setup|Performance and security tuning with Cloudflare CDN configuration.|bolt|/contact', updated_at = NOW()
+UPDATE settings SET setting_value = 'WordPress Hosting|Fast WordPress-ready hosting with SSL, cPanel and one-click installs.|panel|/wordpress-hosting\ncPanel Hosting|Reliable business hosting with email, databases and simple management.|cloud|/hosting\nReseller Hosting|Sell hosting under your own brand with clean order links.|globe|/hosting#reseller-hosting\nDomain Registration|Search and register domains through the main website checkout.|shield|/domains\nWebsite Development|Complete business websites delivered fast with hosting setup included.|code|/website-development\nCloudflare CDN Setup|Performance and security tuning with Cloudflare CDN configuration.|bolt|/contact', updated_at = NOW()
 WHERE setting_key = 'home_service_cards';
 
-UPDATE settings SET setting_value = 'Free SSL|Secure every eligible hosting plan.\ncPanel Hosting|Familiar website and email control.\nWHMCS Billing|Orders, renewals and invoices handled.\nCloudflare CDN|Performance and security setup support.\n48h Website Delivery|Fast delivery for the website package.\nUK-focused Support|Professional support messaging for businesses.', updated_at = NOW()
+UPDATE settings SET setting_value = 'Free SSL|Secure every eligible hosting plan.\ncPanel Hosting|Familiar website and email control.\nEasy Billing|Orders, renewals and invoices handled.\nCloudflare CDN|Performance and security setup support.\n48h Website Delivery|Fast delivery for the website package.\nUK-focused Support|Professional support messaging for businesses.', updated_at = NOW()
 WHERE setting_key = 'home_trust_badges';
 
 UPDATE settings SET setting_value = '/checkout', updated_at = NOW()
@@ -23,7 +27,7 @@ WHERE setting_key = 'default_order_url' AND setting_value LIKE '%clientarea%';
 UPDATE settings SET setting_value = 'Get Website for £199', updated_at = NOW()
 WHERE setting_key = 'home_website_cta_text';
 
-UPDATE settings SET setting_value = 'Choose hosting, search a domain, or order a bespoke £199 website package through a WHMCS-connected flow.', updated_at = NOW()
+UPDATE settings SET setting_value = 'Choose hosting, search a domain, or order a bespoke £199 website package through a secure on-site flow.', updated_at = NOW()
 WHERE setting_key = 'home_final_cta_text';
 
 UPDATE website_packages
@@ -71,5 +75,5 @@ UPDATE faqs SET question = 'What is included in the £199 website package?',
     updated_at = NOW()
 WHERE page_key = 'website-development' AND question = 'What is included in the £200 website package?';
 
-UPDATE faqs SET answer = '<p>The website shows a custom availability results page using the backend WHMCS API integration. When you choose a domain, checkout and billing continue securely inside WHMCS.</p>', updated_at = NOW()
+UPDATE faqs SET answer = '<p>The website shows a custom availability results page. When you choose a domain, checkout and payment continue securely on this website.</p>', updated_at = NOW()
 WHERE page_key = 'domains' AND question = 'What happens after I search a domain?';

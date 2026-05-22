@@ -1,7 +1,7 @@
 <?php
-$clientArea = $whmcs->clientAreaUrl();
 $getStarted = url('/checkout');
 $logo = upload_url($settings['logo_url'] ?? '');
+$isCustomerLoggedIn = !empty($customerUser);
 ?>
 <a class="skip-link" href="#main-content">Skip to content</a>
 <header class="site-header" data-header>
@@ -32,7 +32,12 @@ $logo = upload_url($settings['logo_url'] ?? '');
             <a class="<?= e(is_active('/contact')) ?>" href="<?= e(url('/contact')) ?>">Contact</a>
         </nav>
         <div class="nav-actions">
-            <a class="btn btn-ghost" href="<?= e($clientArea) ?>">Client Login</a>
+            <?php if ($isCustomerLoggedIn): ?>
+                <a class="btn btn-ghost" href="<?= e(url('/account/dashboard')) ?>">My Account</a>
+                <a class="btn btn-outline" href="<?= e(url('/account/logout')) ?>">Logout</a>
+            <?php else: ?>
+                <a class="btn btn-ghost" href="<?= e(url('/account/login')) ?>">Client Login</a>
+            <?php endif; ?>
             <a class="btn btn-primary" href="<?= e($getStarted) ?>">Get Started <?= icon('arrow') ?></a>
         </div>
     </div>

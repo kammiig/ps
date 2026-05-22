@@ -34,6 +34,7 @@ final class ContentRepository
         $settings['whmcs_client_area_url'] ??= env('WHMCS_URL', env('WHMCS_CLIENT_AREA_URL', 'https://planeticsolution.com/clientarea/'));
         $settings['domain_hosting_pid'] ??= env('DOMAIN_HOSTING_PID', '');
         $settings['whmcs_payment_method'] ??= env('WHMCS_PAYMENT_METHOD', 'stripe');
+        $settings['whmcs_payment_gateway_name'] ??= env('WHMCS_PAYMENT_GATEWAY_NAME', '');
         $settings['admin_email'] ??= env('ADMIN_EMAIL', '');
         $settings['mail_from'] ??= env('MAIL_FROM', '');
 

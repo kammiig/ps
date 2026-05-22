@@ -21,8 +21,8 @@
 
 <section class="section muted">
     <div class="container feature-grid">
-        <article><div class="icon-pill"><?= icon('cloud') ?></div><h3>Hosting</h3><p>cPanel, WordPress and reseller hosting ordered on the main website with WHMCS-backed billing.</p></article>
-        <article><div class="icon-pill"><?= icon('globe') ?></div><h3>Domains</h3><p>Domain search and registration through a custom checkout connected securely to WHMCS.</p></article>
+        <article><div class="icon-pill"><?= icon('cloud') ?></div><h3>Hosting</h3><p>cPanel, WordPress and reseller hosting ordered on the main website with secure account billing.</p></article>
+        <article><div class="icon-pill"><?= icon('globe') ?></div><h3>Domains</h3><p>Domain search and registration through a custom checkout connected to your Planetic Solutions account.</p></article>
         <article><div class="icon-pill"><?= icon('code') ?></div><h3>Websites</h3><p>Affordable business website packages with responsive design and SEO foundations.</p></article>
     </div>
 </section>

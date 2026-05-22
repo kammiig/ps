@@ -172,9 +172,9 @@ $websitePackageJson = e(json_encode($websitePackageSummary, JSON_UNESCAPED_SLASH
                         <div><span>Yearly Hosting Renewal</span><strong data-summary-yearly-hosting>£0.00/year</strong></div>
                         <div><span>Yearly Domain Renewal</span><strong data-summary-yearly>£0.00/year</strong></div>
                     </div>
-                    <p class="checkout-help">Secure SSL encrypted payment. Your invoice and service management remain available in your client area.</p>
-                    <button class="btn btn-primary" type="submit">Continue to Payment <?= icon('arrow') ?></button>
-                    <a class="btn btn-outline" href="<?= e($whmcs->clientAreaUrl()) ?>">Existing Client Login</a>
+                    <p class="checkout-help">Secure SSL encrypted payment. Your invoice and service details remain available in your Planetic Solutions account.</p>
+                    <button class="btn btn-primary" type="submit">Continue to Secure Payment <?= icon('arrow') ?></button>
+                    <a class="btn btn-outline" href="<?= e(!empty($customerUser) ? url('/account/dashboard') : url('/account/login')) ?>"><?= !empty($customerUser) ? 'My Account' : 'Existing Client Login' ?></a>
                 </div>
             </aside>
         </form>

@@ -1,6 +1,6 @@
 <?php
 $heroTitle = $settings['home_hero_title'] ?? 'Fast, Secure & Affordable Web Hosting for Your Business';
-$heroSubtitle = $settings['home_hero_subtitle'] ?? 'Planetic Solutions provides reliable hosting, domain registration and complete business websites with WHMCS-powered billing, cPanel access and Cloudflare CDN support.';
+$heroSubtitle = $settings['home_hero_subtitle'] ?? 'Planetic Solutions provides reliable hosting, domain registration and complete business websites with secure on-site billing, cPanel access and Cloudflare CDN support.';
 $primaryText = $settings['home_primary_cta_text'] ?? 'Search Domain';
 $primaryUrl = $settings['home_primary_cta_url'] ?? '#domain-search';
 $secondaryText = $settings['home_secondary_cta_text'] ?? 'View Hosting Plans';
@@ -70,7 +70,7 @@ $websiteChecklist = [
                         </div>
                         <div class="console-row">
                             <span class="console-icon"><?= icon('globe') ?></span>
-                            <div><strong>WHMCS Billing</strong><small>&mdash; Orders and invoices</small></div>
+                            <div><strong>Secure Billing</strong><small>&mdash; Orders and invoices</small></div>
                         </div>
                     </div>
                     <div class="console-meter">
@@ -208,7 +208,7 @@ $websiteChecklist = [
 <?php require APP_PATH . '/Views/partials/faqs.php'; ?>
 <?php
 $title = 'Ready to launch your website?';
-$text = 'Start with hosting, search your domain, or order a complete business website package through a clean WHMCS-connected flow.';
+$text = 'Start with hosting, search your domain, or order a complete business website package through a clean on-site flow.';
 $primaryText = 'Get Started';
 $primaryUrl = url('/checkout');
 $secondaryText = 'Search Domain';

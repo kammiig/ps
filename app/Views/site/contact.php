@@ -12,7 +12,7 @@
         <aside class="page-hero-card">
             <span class="mini-label">Sales and support</span>
             <strong>Main-site ordering</strong>
-            <p>Order on this website, then use WHMCS for invoices, renewals and service management.</p>
+            <p>Order and manage invoices, renewals and service details through your Planetic Solutions account.</p>
         </aside>
     </div>
 </section>
@@ -41,10 +41,10 @@
         </form>
         <aside class="contact-panel">
             <h2>Support and sales</h2>
-            <p>Hosting orders, domain registration and website package orders now start on the main website. WHMCS remains available for invoices, services, support tickets and renewals.</p>
+            <p>Hosting orders, domain registration and website package orders start on the main website, with invoices and services available from your account.</p>
             <?php if (!empty($settings['admin_email'])): ?><a href="mailto:<?= e($settings['admin_email']) ?>"><?= icon('mail') ?> <?= e($settings['admin_email']) ?></a><?php endif; ?>
             <?php if (!empty($settings['phone'])): ?><a href="tel:<?= e(preg_replace('/\s+/', '', $settings['phone'])) ?>"><?= icon('phone') ?> <?= e($settings['phone']) ?></a><?php endif; ?>
-            <a href="<?= e($whmcs->clientAreaUrl()) ?>"><?= icon('panel') ?> WHMCS Client Area</a>
+            <a href="<?= e(url('/account/login')) ?>"><?= icon('panel') ?> Client Login</a>
         </aside>
     </div>
 </section>

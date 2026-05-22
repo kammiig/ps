@@ -30,4 +30,26 @@ final class Mailer
 
         return mail($to, $subject, $body, implode("\r\n", $headers));
     }
+
+    public static function customerPasswordReset(array $settings, array $user, string $resetUrl): bool
+    {
+        $to = $user['email'] ?? '';
+        if (!$to) {
+            return false;
+        }
+
+        $subject = 'Reset your Planetic Solutions password';
+        $body = "Hello {$user['first_name']},\n\n"
+            . "Use this secure link to reset your Planetic Solutions account password:\n\n"
+            . $resetUrl . "\n\n"
+            . "This link expires in 60 minutes. If you did not request this, you can ignore this email.\n";
+
+        $from = $settings['mail_from'] ?? env('MAIL_FROM', $settings['admin_email'] ?? $to);
+        $headers = [
+            'From: Planetic Solutions <' . $from . '>',
+            'Content-Type: text/plain; charset=UTF-8',
+        ];
+
+        return mail($to, $subject, $body, implode("\r\n", $headers));
+    }
 }

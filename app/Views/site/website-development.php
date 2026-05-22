@@ -47,7 +47,7 @@ $packagePriceLabel = '£' . rtrim(rtrim(number_format((float) $packagePrice, 2, 
             </div>
         </div>
         <div class="steps-grid">
-            <article><span>01</span><h3>Choose package</h3><p>Order on the Planetic Solutions website while WHMCS handles billing and provisioning behind the scenes.</p></article>
+            <article><span>01</span><h3>Choose package</h3><p>Order on the Planetic Solutions website and continue through secure on-site payment.</p></article>
             <article><span>02</span><h3>Share content</h3><p>Send logo, pages, service details and any brand references you already have.</p></article>
             <article><span>03</span><h3>Build and connect</h3><p>The site is built, connected to hosting, secured with SSL and prepared for Cloudflare CDN.</p></article>
             <article><span>04</span><h3>Launch</h3><p>Review the website, request practical edits and go live with a clean business presence.</p></article>

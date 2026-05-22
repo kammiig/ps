@@ -2,7 +2,7 @@
     <div class="container narrow">
         <span class="section-kicker">Domain result</span>
         <h1><?= e($domain) ?> is <?= !empty($result['available']) ? 'available' : 'not available' ?></h1>
-        <p>Continue to WHMCS to complete registration, transfer, billing and client account setup.</p>
+        <p>Continue through secure Planetic Solutions checkout to complete registration, billing and account setup.</p>
         <div class="actions">
             <?php if (!empty($result['available'])): ?>
                 <a class="btn btn-primary" href="<?= e($registerUrl) ?>">Register Domain <?= icon('arrow') ?></a>

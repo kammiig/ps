@@ -29,8 +29,14 @@ $allowedActions = [
     'GetClientsDetails',
     'AddClient',
     'AddOrder',
+    'AddInvoicePayment',
     'AcceptOrder',
     'CreateSsoToken',
+    'GetInvoice',
+    'GetInvoices',
+    'GetClientsProducts',
+    'GetClientsDomains',
+    'UpdateClient',
 ];
 
 $action = (string) ($_POST['action'] ?? '');

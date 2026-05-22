@@ -1,5 +1,4 @@
 <?php
-$clientArea = $whmcs->clientAreaUrl();
 $whatsapp = trim((string) ($settings['whatsapp_number'] ?? ''));
 $whatsappUrl = $whatsapp ? 'https://wa.me/' . preg_replace('/\D+/', '', $whatsapp) : '';
 ?>
@@ -27,8 +26,8 @@ $whatsappUrl = $whatsapp ? 'https://wa.me/' . preg_replace('/\D+/', '', $whatsap
         </div>
         <div>
             <h2>Support</h2>
-            <a href="<?= e($clientArea) ?>">Client Login</a>
-            <a href="<?= e($clientArea) ?>">Invoices & Services</a>
+            <a href="<?= e(url('/account/login')) ?>">Client Login</a>
+            <a href="<?= e(url('/account/billing')) ?>">Invoices & Services</a>
             <a href="<?= e(url('/contact')) ?>">Contact Support</a>
             <?php if ($whatsappUrl): ?><a href="<?= e($whatsappUrl) ?>">WhatsApp</a><?php endif; ?>
         </div>

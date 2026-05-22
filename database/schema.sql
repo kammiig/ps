@@ -12,6 +12,11 @@ DROP TABLE IF EXISTS domain_tlds;
 DROP TABLE IF EXISTS hosting_plans;
 DROP TABLE IF EXISTS seo_settings;
 DROP TABLE IF EXISTS settings;
+DROP TABLE IF EXISTS stripe_webhook_events;
+DROP TABLE IF EXISTS customer_orders;
+DROP TABLE IF EXISTS customer_password_resets;
+DROP TABLE IF EXISTS customer_rate_limits;
+DROP TABLE IF EXISTS customer_users;
 DROP TABLE IF EXISTS users;
 
 SET FOREIGN_KEY_CHECKS = 1;
@@ -26,6 +31,85 @@ CREATE TABLE users (
     last_login_at DATETIME NULL,
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE customer_users (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    whmcs_client_id INT UNSIGNED NULL UNIQUE,
+    first_name VARCHAR(120) NOT NULL,
+    last_name VARCHAR(120) NOT NULL,
+    company_name VARCHAR(160) NULL,
+    email VARCHAR(190) NOT NULL UNIQUE,
+    phone VARCHAR(80) NULL,
+    address VARCHAR(255) NULL,
+    city VARCHAR(120) NULL,
+    state VARCHAR(120) NULL,
+    postcode VARCHAR(40) NULL,
+    country CHAR(2) NOT NULL DEFAULT 'GB',
+    password_hash VARCHAR(255) NOT NULL,
+    is_active TINYINT(1) NOT NULL DEFAULT 1,
+    last_login_at DATETIME NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    INDEX customer_users_email_index (email),
+    INDEX customer_users_whmcs_index (whmcs_client_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE customer_password_resets (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    customer_user_id INT UNSIGNED NOT NULL,
+    token_hash VARCHAR(255) NOT NULL UNIQUE,
+    expires_at DATETIME NOT NULL,
+    used_at DATETIME NULL,
+    created_at DATETIME NOT NULL,
+    INDEX customer_password_resets_user_index (customer_user_id),
+    CONSTRAINT customer_password_resets_user_fk FOREIGN KEY (customer_user_id) REFERENCES customer_users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE customer_rate_limits (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    action VARCHAR(80) NOT NULL,
+    identifier VARCHAR(190) NOT NULL,
+    attempts INT UNSIGNED NOT NULL DEFAULT 0,
+    available_at DATETIME NULL,
+    expires_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    UNIQUE KEY customer_rate_limits_action_identifier_unique (action, identifier)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE customer_orders (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    public_token CHAR(64) NOT NULL UNIQUE,
+    customer_user_id INT UNSIGNED NULL,
+    whmcs_client_id INT UNSIGNED NOT NULL,
+    whmcs_order_id INT UNSIGNED NULL,
+    whmcs_invoice_id INT UNSIGNED NOT NULL UNIQUE,
+    invoice_amount DECIMAL(12,2) NOT NULL,
+    currency CHAR(3) NOT NULL DEFAULT 'GBP',
+    payment_status ENUM('pending', 'processing', 'paid', 'failed') NOT NULL DEFAULT 'pending',
+    stripe_payment_intent_id VARCHAR(120) NULL UNIQUE,
+    stripe_payment_reference VARCHAR(160) NULL,
+    last_error TEXT NULL,
+    paid_at DATETIME NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    INDEX customer_orders_customer_index (customer_user_id),
+    INDEX customer_orders_whmcs_client_index (whmcs_client_id),
+    INDEX customer_orders_status_index (payment_status),
+    CONSTRAINT customer_orders_user_fk FOREIGN KEY (customer_user_id) REFERENCES customer_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE stripe_webhook_events (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    stripe_event_id VARCHAR(160) NOT NULL UNIQUE,
+    event_type VARCHAR(120) NOT NULL,
+    payment_intent_id VARCHAR(120) NULL,
+    customer_order_id INT UNSIGNED NULL,
+    processing_status ENUM('received', 'processed', 'failed') NOT NULL DEFAULT 'received',
+    created_at DATETIME NOT NULL,
+    processed_at DATETIME NULL,
+    INDEX stripe_webhook_events_payment_intent_index (payment_intent_id),
+    CONSTRAINT stripe_webhook_events_order_fk FOREIGN KEY (customer_order_id) REFERENCES customer_orders(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE settings (
@@ -204,6 +288,7 @@ INSERT INTO settings (setting_key, setting_value, updated_at) VALUES
 ('whmcs_api_identifier', '', NOW()),
 ('whmcs_api_secret', '', NOW()),
 ('whmcs_payment_method', 'stripe', NOW()),
+('whmcs_payment_gateway_name', '', NOW()),
 ('domain_hosting_pid', '2', NOW()),
 ('default_order_url', '/checkout', NOW()),
 ('google_analytics', '', NOW()),
@@ -213,35 +298,35 @@ INSERT INTO settings (setting_key, setting_value, updated_at) VALUES
 ('cloudflare_zone_id', '', NOW()),
 ('cloudflare_api_token', '', NOW()),
 ('home_hero_title', 'Fast, Secure & Affordable Web Hosting for Your Business', NOW()),
-('home_hero_subtitle', 'Planetic Solutions provides reliable hosting, domain registration and complete business websites with WHMCS-powered billing, cPanel access and Cloudflare CDN support.', NOW()),
+('home_hero_subtitle', 'Planetic Solutions provides reliable hosting, domain registration and complete business websites with secure on-site billing, cPanel access and Cloudflare CDN support.', NOW()),
 ('home_primary_cta_text', 'Search Domain', NOW()),
 ('home_primary_cta_url', '#domain-search', NOW()),
 ('home_secondary_cta_text', 'View Hosting Plans', NOW()),
 ('home_secondary_cta_url', '/hosting', NOW()),
 ('home_website_cta_text', 'Get Website for £199', NOW()),
 ('home_website_cta_url', '/website-development', NOW()),
-('home_service_cards', 'WordPress Hosting|Fast WordPress-ready hosting with SSL, cPanel and one-click installs.|panel|/wordpress-hosting\ncPanel Hosting|Reliable business hosting with email, databases and simple management.|cloud|/hosting\nReseller Hosting|Sell hosting under your own brand with WHMCS-backed billing.|globe|/hosting#reseller-hosting\nDomain Registration|Search and register domains through the main website checkout.|shield|/domains\nWebsite Development|Complete business websites delivered fast with hosting setup included.|code|/website-development\nCloudflare CDN Setup|Performance and security tuning with Cloudflare CDN configuration.|bolt|/contact', NOW()),
-('home_trust_badges', 'Free SSL|Secure every eligible hosting plan.\ncPanel Hosting|Familiar website and email control.\nWHMCS Billing|Orders, renewals and invoices handled.\nCloudflare CDN|Performance and security setup support.\n48h Website Delivery|Fast delivery for the website package.\nUK-focused Support|Professional support messaging for businesses.', NOW()),
-('home_feature_sections', 'Speed & Performance|LiteSpeed/cache-ready wording, efficient hosting resources and Cloudflare support help your website feel quick from the first visit.|bolt\nSecurity & Backups|Free SSL, hardened hosting practices and backup-friendly cPanel workflows keep everyday business sites protected.|shield\nWordPress Ready|Install WordPress quickly, connect Elementor-friendly tooling and manage updates through a simple control panel.|panel\nFree Website Migration|Move from another provider with practical migration support and minimum disruption to your business.|cloud\nSEO Ready Hosting|Clean performance foundations, HTTPS, schema-ready pages and editable metadata built into the website.|globe\nBusiness Support|Clear support pathways through WHMCS, contact forms and direct service inquiry flows.|mail', NOW()),
+('home_service_cards', 'WordPress Hosting|Fast WordPress-ready hosting with SSL, cPanel and one-click installs.|panel|/wordpress-hosting\ncPanel Hosting|Reliable business hosting with email, databases and simple management.|cloud|/hosting\nReseller Hosting|Sell hosting under your own brand with clean order links.|globe|/hosting#reseller-hosting\nDomain Registration|Search and register domains through the main website checkout.|shield|/domains\nWebsite Development|Complete business websites delivered fast with hosting setup included.|code|/website-development\nCloudflare CDN Setup|Performance and security tuning with Cloudflare CDN configuration.|bolt|/contact', NOW()),
+('home_trust_badges', 'Free SSL|Secure every eligible hosting plan.\ncPanel Hosting|Familiar website and email control.\nEasy Billing|Orders, renewals and invoices handled.\nCloudflare CDN|Performance and security setup support.\n48h Website Delivery|Fast delivery for the website package.\nUK-focused Support|Professional support messaging for businesses.', NOW()),
+('home_feature_sections', 'Speed & Performance|LiteSpeed/cache-ready wording, efficient hosting resources and Cloudflare support help your website feel quick from the first visit.|bolt\nSecurity & Backups|Free SSL, hardened hosting practices and backup-friendly cPanel workflows keep everyday business sites protected.|shield\nWordPress Ready|Install WordPress quickly, connect Elementor-friendly tooling and manage updates through a simple control panel.|panel\nFree Website Migration|Move from another provider with practical migration support and minimum disruption to your business.|cloud\nSEO Ready Hosting|Clean performance foundations, HTTPS, schema-ready pages and editable metadata built into the website.|globe\nBusiness Support|Clear support pathways through account billing, contact forms and direct service inquiry flows.|mail', NOW()),
 ('home_final_cta_title', 'Ready to launch with Planetic Solutions?', NOW()),
-('home_final_cta_text', 'Choose hosting, search a domain, or order a bespoke £199 website package through a WHMCS-connected flow.', NOW());
+('home_final_cta_text', 'Choose hosting, search a domain, or order a bespoke £199 website package through a secure on-site flow.', NOW());
 
 INSERT INTO seo_settings (route_key, meta_title, meta_description, keywords, og_title, og_image, canonical_url, created_at, updated_at) VALUES
 ('home', 'Planetic Solutions | Web Hosting, Domains & £199 Websites', 'Fast, secure and affordable web hosting, reseller hosting, WordPress hosting, domain registration and £199 business websites.', 'web hosting, reseller hosting, WordPress hosting, cPanel hosting, domains, website development', 'Planetic Solutions Hosting and Website Development', '', '', NOW(), NOW()),
-('hosting', 'Hosting Plans | Planetic Solutions', 'Compare editable cPanel, WordPress and reseller hosting plans with main-site checkout and WHMCS-backed billing.', 'hosting plans, cPanel hosting, reseller hosting, WordPress hosting', 'Hosting Plans from Planetic Solutions', '', '', NOW(), NOW()),
+('hosting', 'Hosting Plans | Planetic Solutions', 'Compare editable cPanel, WordPress and reseller hosting plans with main-site checkout and secure account billing.', 'hosting plans, cPanel hosting, reseller hosting, WordPress hosting', 'Hosting Plans from Planetic Solutions', '', '', NOW(), NOW()),
 ('wordpress-hosting', 'WordPress Hosting | Planetic Solutions', 'Fast WordPress hosting with free SSL, cPanel, installer support, Cloudflare CDN and Elementor-friendly setup.', 'WordPress hosting, Elementor hosting, cPanel WordPress', 'WordPress Hosting from Planetic Solutions', '', '', NOW(), NOW()),
 ('website-development', 'Bespoke Website Development for just £199 | Planetic Solutions', 'Order a bespoke business website for £199 with first-year domain and hosting support, Elementor setup, content writing, SSL, Cloudflare CDN and 48 hour delivery.', '£199 website, business website, website development', 'Bespoke Website Development for just £199', '', '', NOW(), NOW()),
-('domains', 'Domain Registration | Planetic Solutions', 'Search and register domains on the main website with WHMCS-backed billing and live domain checks.', 'domain registration, domain search, WHMCS domains', 'Domain Search and Registration', '', '', NOW(), NOW()),
+('domains', 'Domain Registration | Planetic Solutions', 'Search and register domains on the main website with secure account billing and live domain checks.', 'domain registration, domain search', 'Domain Search and Registration', '', '', NOW(), NOW()),
 ('about', 'About Planetic Solutions | Hosting, Domains & Websites', 'Learn about Planetic Solutions, a hosting, domains, website development and digital support provider.', 'about Planetic Solutions', 'About Planetic Solutions', '', '', NOW(), NOW()),
 ('contact', 'Contact Planetic Solutions | Hosting and Website Support', 'Contact Planetic Solutions for hosting, domain registration, reseller hosting, Cloudflare setup or website development.', 'contact hosting provider, website development inquiry', 'Contact Planetic Solutions', '', '', NOW(), NOW()),
 ('blog', 'Hosting Blog | Planetic Solutions', 'Read hosting, domains, WordPress, Cloudflare and website development guides from Planetic Solutions.', 'hosting blog, WordPress tips, domain guides', 'Planetic Solutions Blog', '', '', NOW(), NOW()),
 ('404', 'Page Not Found | Planetic Solutions', 'The requested page could not be found.', '', 'Page Not Found', '', '', NOW(), NOW());
 
 INSERT INTO hosting_plans (plan_type, title, slug, description, monthly_price, yearly_price, storage, bandwidth, email_accounts, features_json, whmcs_url, button_text, badge, is_highlighted, is_active, sort_order, created_at, updated_at) VALUES
-('starter', 'Starter Hosting', 'starter-hosting', 'A simple hosting foundation for new business websites and small portfolios.', '4.99', '49.99', '5GB SSD', '50GB', '5 accounts', '["WHMCS billing checkout","Business email setup support"]', 'https://planeticsolution.com/clientarea/cart.php?a=add&pid=1', 'Order Starter', '', 0, 1, 10, NOW(), NOW()),
+('starter', 'Starter Hosting', 'starter-hosting', 'A simple hosting foundation for new business websites and small portfolios.', '4.99', '49.99', '5GB SSD', '50GB', '5 accounts', '["Secure account checkout","Business email setup support"]', 'https://planeticsolution.com/clientarea/cart.php?a=add&pid=1', 'Order Starter', '', 0, 1, 10, NOW(), NOW()),
 ('business', 'Business Hosting', 'business-hosting', 'More room for business websites, emails and steady traffic growth.', '8.99', '89.99', '15GB SSD', '150GB', '25 accounts', '["Priority business setup support","Extra room for growing sites"]', 'https://planeticsolution.com/clientarea/cart.php?a=add&pid=2', 'Order Business', 'Recommended', 1, 1, 20, NOW(), NOW()),
 ('wordpress', 'WordPress Hosting', 'wordpress-hosting-plan', 'WordPress-ready hosting with installer support and cache-friendly performance wording.', '9.99', '99.99', '20GB SSD', '200GB', '25 accounts', '["WordPress auto installer","LiteSpeed/cache-ready wording","Elementor-friendly hosting"]', 'https://planeticsolution.com/clientarea/cart.php?a=add&pid=3', 'Order WordPress', '', 0, 1, 30, NOW(), NOW()),
-('reseller', 'Reseller Hosting', 'reseller-hosting-plan', 'Reseller hosting for agencies and freelancers who want to sell hosting through WHMCS.', '19.99', '199.99', '50GB SSD', '500GB', 'Configurable accounts', '["cPanel/WHM ready","WHMCS product link support","Client billing through WHMCS"]', 'https://planeticsolution.com/clientarea/cart.php?a=add&pid=4', 'Order Reseller', 'Best for agencies', 0, 1, 40, NOW(), NOW());
+('reseller', 'Reseller Hosting', 'reseller-hosting-plan', 'Reseller hosting for agencies and freelancers who want to sell hosting to their own clients.', '19.99', '199.99', '50GB SSD', '500GB', 'Configurable accounts', '["cPanel/WHM ready","Checkout mapping support","Client billing support"]', 'https://planeticsolution.com/clientarea/cart.php?a=add&pid=4', 'Order Reseller', 'Best for agencies', 0, 1, 40, NOW(), NOW());
 
 INSERT INTO domain_tlds (extension, price, whmcs_url, is_active, sort_order, created_at, updated_at) VALUES
 ('.com', 'From £12.99/yr', 'https://planeticsolution.com/clientarea/cart.php?a=add&domain=register', 1, 10, NOW(), NOW()),
@@ -253,35 +338,35 @@ INSERT INTO website_packages (id, title, price, description, delivery_time, feat
 (1, 'Bespoke Website Development', '199', 'Launch a professional business website with domain, hosting setup, Elementor, premium Envato elements, stock photos, content writing and Cloudflare integration included.', '48 hours', '["Professional business website","Free domain and hosting for 1 year","Free Elementor","Free Envato premium elements","Free stock photos","Free premium content writing","Free Cloudflare integration","Free SSL setup","Free domain and hosting setup support"]', 'Get Complete Website Package', '/checkout?type=website', 0, 1, NOW(), NOW());
 
 INSERT INTO pages (slug, title, body, meta_title, meta_description, keywords, og_title, og_image, canonical_url, created_at, updated_at) VALUES
-('about', 'About Planetic Solutions', '<p>Planetic Solutions provides practical hosting, domain registration, website development and digital support for businesses that want a reliable online foundation without unnecessary complexity.</p><p>Our services are built around clear order flows, WHMCS billing, cPanel hosting, WordPress-ready setup, Cloudflare CDN support and affordable business website packages.</p><p>We focus on dependable setup, professional communication and flexible services that can grow with your business.</p>', 'About Planetic Solutions', 'Professional company overview for Planetic Solutions, covering hosting, domains, websites and digital support.', 'Planetic Solutions, hosting company, website development', 'About Planetic Solutions', '', '', NOW(), NOW()),
+('about', 'About Planetic Solutions', '<p>Planetic Solutions provides practical hosting, domain registration, website development and digital support for businesses that want a reliable online foundation without unnecessary complexity.</p><p>Our services are built around clear order flows, secure account billing, cPanel hosting, WordPress-ready setup, Cloudflare CDN support and affordable business website packages.</p><p>We focus on dependable setup, professional communication and flexible services that can grow with your business.</p>', 'About Planetic Solutions', 'Professional company overview for Planetic Solutions, covering hosting, domains, websites and digital support.', 'Planetic Solutions, hosting company, website development', 'About Planetic Solutions', '', '', NOW(), NOW()),
 ('contact', 'Tell Us What You Need', '<p>Ask about hosting, reseller hosting, domain registration, Cloudflare setup or the £199 website package.</p>', 'Contact Planetic Solutions', 'Contact Planetic Solutions for hosting, domains, website development and support inquiries.', 'contact Planetic Solutions', 'Contact Planetic Solutions', '', '', NOW(), NOW()),
-('privacy-policy', 'Privacy Policy', '<p>This Privacy Policy explains how Planetic Solutions collects, uses and protects personal information submitted through this website, WHMCS client area, billing systems and contact forms.</p><h2>Information we collect</h2><p>We may collect contact details, billing details, service inquiry information, domain registration details and technical information required to provide hosting and website services.</p><h2>How we use information</h2><p>Information is used to provide services, respond to inquiries, manage orders, maintain security, meet legal obligations and improve support.</p><h2>Contact</h2><p>Contact Planetic Solutions if you need your personal data updated, exported or removed where legally possible.</p>', 'Privacy Policy | Planetic Solutions', 'Privacy Policy for Planetic Solutions hosting, domains and website development services.', 'privacy policy', 'Privacy Policy', '', '', NOW(), NOW()),
-('terms-and-conditions', 'Terms and Conditions', '<p>These Terms and Conditions outline the general rules for using Planetic Solutions services, including hosting, domain registration, website development and related support.</p><h2>Services</h2><p>Hosting and domain orders are processed through WHMCS. Domain registration, renewals and billing are subject to the terms shown at checkout and any applicable registry rules.</p><h2>Website development</h2><p>The £199 website package includes the items described on the website package page. Premium tools, Elementor Pro and Envato assets are included only where legally licensed by Planetic Solutions.</p><h2>Acceptable use</h2><p>Customers must not use services for illegal, abusive, harmful or resource-abusive activity.</p>', 'Terms and Conditions | Planetic Solutions', 'Terms and Conditions for Planetic Solutions hosting, domains and website development services.', 'terms, hosting terms', 'Terms and Conditions', '', '', NOW(), NOW()),
-('refund-policy', 'Refund Policy', '<p>This Refund Policy explains how Planetic Solutions handles refund requests for hosting, domains, website development and related services.</p><h2>Hosting</h2><p>Hosting refund eligibility depends on the package, billing term and the terms shown during WHMCS checkout.</p><h2>Domains</h2><p>Domain registrations, renewals and transfers are usually non-refundable once submitted to the registry.</p><h2>Website development</h2><p>Website development payments may be non-refundable once work has started, unless otherwise agreed in writing.</p>', 'Refund Policy | Planetic Solutions', 'Refund Policy for hosting, domains and website development services from Planetic Solutions.', 'refund policy, hosting refunds', 'Refund Policy', '', '', NOW(), NOW()),
-('acceptable-use-policy', 'Acceptable Use Policy', '<p>This Acceptable Use Policy sets expectations for safe, lawful and fair use of Planetic Solutions hosting and related services.</p><h2>Prohibited activity</h2><p>Customers must not host malware, phishing, spam systems, illegal content, abusive scripts, copyright-infringing material or content that harms other users or networks.</p><h2>Resource use</h2><p>Services must be used within the limits of the selected package and any WHMCS product terms.</p><h2>Enforcement</h2><p>Planetic Solutions may suspend or restrict services to protect platform security, compliance and other customers.</p>', 'Acceptable Use Policy | Planetic Solutions', 'Acceptable Use Policy for Planetic Solutions hosting services.', 'acceptable use policy, hosting rules', 'Acceptable Use Policy', '', '', NOW(), NOW());
+('privacy-policy', 'Privacy Policy', '<p>This Privacy Policy explains how Planetic Solutions collects, uses and protects personal information submitted through this website, billing systems and contact forms.</p><h2>Information we collect</h2><p>We may collect contact details, billing details, service inquiry information, domain registration details and technical information required to provide hosting and website services.</p><h2>How we use information</h2><p>Information is used to provide services, respond to inquiries, manage orders, maintain security, meet legal obligations and improve support.</p><h2>Contact</h2><p>Contact Planetic Solutions if you need your personal data updated, exported or removed where legally possible.</p>', 'Privacy Policy | Planetic Solutions', 'Privacy Policy for Planetic Solutions hosting, domains and website development services.', 'privacy policy', 'Privacy Policy', '', '', NOW(), NOW()),
+('terms-and-conditions', 'Terms and Conditions', '<p>These Terms and Conditions outline the general rules for using Planetic Solutions services, including hosting, domain registration, website development and related support.</p><h2>Services</h2><p>Hosting and domain orders are processed through secure checkout. Domain registration, renewals and billing are subject to the terms shown at checkout and any applicable registry rules.</p><h2>Website development</h2><p>The £199 website package includes the items described on the website package page. Premium tools, Elementor Pro and Envato assets are included only where legally licensed by Planetic Solutions.</p><h2>Acceptable use</h2><p>Customers must not use services for illegal, abusive, harmful or resource-abusive activity.</p>', 'Terms and Conditions | Planetic Solutions', 'Terms and Conditions for Planetic Solutions hosting, domains and website development services.', 'terms, hosting terms', 'Terms and Conditions', '', '', NOW(), NOW()),
+('refund-policy', 'Refund Policy', '<p>This Refund Policy explains how Planetic Solutions handles refund requests for hosting, domains, website development and related services.</p><h2>Hosting</h2><p>Hosting refund eligibility depends on the package, billing term and the terms shown during checkout.</p><h2>Domains</h2><p>Domain registrations, renewals and transfers are usually non-refundable once submitted to the registry.</p><h2>Website development</h2><p>Website development payments may be non-refundable once work has started, unless otherwise agreed in writing.</p>', 'Refund Policy | Planetic Solutions', 'Refund Policy for hosting, domains and website development services from Planetic Solutions.', 'refund policy, hosting refunds', 'Refund Policy', '', '', NOW(), NOW()),
+('acceptable-use-policy', 'Acceptable Use Policy', '<p>This Acceptable Use Policy sets expectations for safe, lawful and fair use of Planetic Solutions hosting and related services.</p><h2>Prohibited activity</h2><p>Customers must not host malware, phishing, spam systems, illegal content, abusive scripts, copyright-infringing material or content that harms other users or networks.</p><h2>Resource use</h2><p>Services must be used within the limits of the selected package and applicable product terms.</p><h2>Enforcement</h2><p>Planetic Solutions may suspend or restrict services to protect platform security, compliance and other customers.</p>', 'Acceptable Use Policy | Planetic Solutions', 'Acceptable Use Policy for Planetic Solutions hosting services.', 'acceptable use policy, hosting rules', 'Acceptable Use Policy', '', '', NOW(), NOW());
 
 INSERT INTO testimonials (name, role, company, quote, image_url, rating, is_active, sort_order, created_at, updated_at) VALUES
 ('Placeholder Client One', 'Business Owner', 'Replace With Real Company', 'Planetic Solutions made the hosting and website setup process clear and straightforward. Replace this placeholder with a real testimonial.', '', 5, 1, 10, NOW(), NOW()),
-('Placeholder Client Two', 'Founder', 'Replace With Real Company', 'The WHMCS order flow and support process helped us get online quickly. Replace this placeholder with a real testimonial.', '', 5, 1, 20, NOW(), NOW()),
+('Placeholder Client Two', 'Founder', 'Replace With Real Company', 'The order flow and support process helped us get online quickly. Replace this placeholder with a real testimonial.', '', 5, 1, 20, NOW(), NOW()),
 ('Placeholder Client Three', 'Consultant', 'Replace With Real Company', 'Our website package was easy to understand and ready fast. Replace this placeholder with a real testimonial.', '', 5, 1, 30, NOW(), NOW());
 
 INSERT INTO faqs (page_key, question, answer, is_active, sort_order, created_at, updated_at) VALUES
-('home', 'How do hosting orders work?', '<p>Hosting buttons send customers to the main website checkout. The backend then creates the client, order and invoice in WHMCS.</p>', 1, 10, NOW(), NOW()),
-('home', 'Can I edit the prices and plan features?', '<p>Yes. The admin dashboard lets you edit plan title, price, storage, bandwidth, email accounts, features, badge and button text. Product IDs are mapped in the server-side WHMCS config.</p>', 1, 20, NOW(), NOW()),
+('home', 'How do hosting orders work?', '<p>Hosting buttons send customers to the main website checkout. Your order, invoice and account details are prepared securely in the background.</p>', 1, 10, NOW(), NOW()),
+('home', 'Can I edit the prices and plan features?', '<p>Yes. The admin dashboard lets you edit plan title, price, storage, bandwidth, email accounts, features, badge and button text. Product mappings are managed server-side.</p>', 1, 20, NOW(), NOW()),
 ('home', 'Is the £199 website offer editable?', '<p>Yes. You can edit the price, included features, delivery time and CTA/order link from the dashboard.</p>', 1, 30, NOW(), NOW()),
 ('hosting', 'Do plans include cPanel?', '<p>Yes. The seeded plans include cPanel wording, and you can edit plan features from the admin dashboard.</p>', 1, 10, NOW(), NOW()),
-('hosting', 'Do you support reseller hosting?', '<p>Yes. The reseller plan can be mapped to the correct WHMCS product ID while customers order through the main website checkout.</p>', 1, 20, NOW(), NOW()),
-('wordpress', 'Is WordPress auto installer support included?', '<p>The WordPress hosting page includes auto installer wording and cPanel support messaging. Confirm exact installer availability in your WHMCS product terms.</p>', 1, 10, NOW(), NOW()),
+('hosting', 'Do you support reseller hosting?', '<p>Yes. The reseller plan can be mapped to the correct product while customers order through the main website checkout.</p>', 1, 20, NOW(), NOW()),
+('wordpress', 'Is WordPress auto installer support included?', '<p>The WordPress hosting page includes auto installer wording and cPanel support messaging. Confirm exact installer availability in your selected product terms.</p>', 1, 10, NOW(), NOW()),
 ('wordpress', 'Can you build the WordPress website for me?', '<p>Yes. The website development package is available for £199 and can be ordered from the website.</p>', 1, 20, NOW(), NOW()),
 ('website-development', 'What is included in the £199 website package?', '<p>The package includes a professional business website, first-year domain and hosting support, Elementor, Envato premium elements, stock photos, premium content writing, SSL and Cloudflare integration.</p>', 1, 10, NOW(), NOW()),
 ('website-development', 'Are Elementor Pro and Envato assets included?', '<p>They are included only where legally licensed by Planetic Solutions. This wording is intentionally clear so the offer remains compliant.</p>', 1, 20, NOW(), NOW()),
 ('website-development', 'How fast is delivery?', '<p>The offer states delivery in 48 hours, subject to receiving the required content and access details.</p>', 1, 30, NOW(), NOW()),
-('domains', 'Are domain prices live from WHMCS?', '<p>Checkout and billing rates are confirmed in WHMCS. The display cards on this website can be edited manually if live API pricing is not enabled.</p>', 1, 10, NOW(), NOW()),
-('domains', 'What happens after I search a domain?', '<p>The website shows a custom availability results page using the backend WHMCS API integration. When you choose a domain, checkout and billing continue securely inside WHMCS.</p>', 1, 20, NOW(), NOW());
+('domains', 'Are domain prices live?', '<p>Checkout and billing rates are confirmed during the secure order flow. The display cards on this website can be edited manually if live pricing is not enabled.</p>', 1, 10, NOW(), NOW()),
+('domains', 'What happens after I search a domain?', '<p>The website shows a custom availability results page. When you choose a domain, checkout and payment continue securely on this website.</p>', 1, 20, NOW(), NOW());
 
 INSERT INTO blog_categories (name, slug, created_at, updated_at) VALUES
 ('Hosting Guides', 'hosting-guides', NOW(), NOW()),
 ('Website Tips', 'website-tips', NOW(), NOW());
 
 INSERT INTO blog_posts (category_id, title, slug, featured_image, featured_alt, meta_title, meta_description, content, status, published_at, created_at, updated_at) VALUES
-(1, 'How to Choose the Right Hosting Plan for a Small Business', 'choose-right-hosting-plan-small-business', '', 'Hosting plan comparison for a small business website', 'How to Choose the Right Hosting Plan for a Small Business', 'A simple guide to choosing hosting based on storage, email, WordPress support, SSL, cPanel and future growth.', '<p>Choosing hosting starts with your website goals. A small brochure website may only need starter resources, while a busy WordPress site or client portfolio needs more storage, email capacity and room to grow.</p><h2>Start with your platform</h2><p>If you are using WordPress, choose hosting with WordPress installer support, free SSL and cache-ready performance wording.</p><h2>Check billing and support</h2><p>WHMCS-connected order flows make billing, invoices, renewals and support easier to manage from one client area.</p><h2>Plan for growth</h2><p>Choose a plan that can be upgraded as traffic, email accounts and content grow.</p>', 'published', NOW(), NOW(), NOW());
+(1, 'How to Choose the Right Hosting Plan for a Small Business', 'choose-right-hosting-plan-small-business', '', 'Hosting plan comparison for a small business website', 'How to Choose the Right Hosting Plan for a Small Business', 'A simple guide to choosing hosting based on storage, email, WordPress support, SSL, cPanel and future growth.', '<p>Choosing hosting starts with your website goals. A small brochure website may only need starter resources, while a busy WordPress site or client portfolio needs more storage, email capacity and room to grow.</p><h2>Start with your platform</h2><p>If you are using WordPress, choose hosting with WordPress installer support, free SSL and cache-ready performance wording.</p><h2>Check billing and support</h2><p>A clean account area makes billing, invoices, renewals and support easier to manage from one place.</p><h2>Plan for growth</h2><p>Choose a plan that can be upgraded as traffic, email accounts and content grow.</p>', 'published', NOW(), NOW(), NOW());

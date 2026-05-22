@@ -73,7 +73,7 @@ final class AdminController extends Controller
                     'company_name', 'tagline', 'app_url', 'logo_url', 'favicon_url', 'og_image',
                     'admin_email', 'mail_from', 'phone', 'whatsapp_number', 'address',
                     'facebook_url', 'instagram_url', 'linkedin_url', 'x_url',
-                    'whmcs_client_area_url', 'whmcs_api_url', 'whmcs_api_identifier', 'whmcs_api_secret', 'whmcs_payment_method', 'domain_hosting_pid',
+                    'whmcs_client_area_url', 'whmcs_api_url', 'whmcs_api_identifier', 'whmcs_api_secret', 'whmcs_payment_method', 'whmcs_payment_gateway_name', 'domain_hosting_pid',
                     'google_analytics', 'recaptcha_site_key', 'recaptcha_secret_key',
                     'cloudflare_zone_id', 'cloudflare_api_token', 'default_order_url',
                 ]);
@@ -119,6 +119,7 @@ final class AdminController extends Controller
                 ['name' => 'whmcs_api_identifier', 'label' => 'WHMCS API Identifier', 'type' => 'text'],
                 ['name' => 'whmcs_api_secret', 'label' => 'WHMCS API Secret', 'type' => 'password'],
                 ['name' => 'whmcs_payment_method', 'label' => 'WHMCS Payment Method System Name', 'type' => 'text'],
+                ['name' => 'whmcs_payment_gateway_name', 'label' => 'WHMCS Gateway Name for Stripe Invoice Payments', 'type' => 'text'],
                 ['name' => 'domain_hosting_pid', 'label' => 'Domain + Hosting Product ID', 'type' => 'text'],
                 ['name' => 'default_order_url', 'label' => 'Default Get Started URL', 'type' => 'url'],
                 ['name' => 'google_analytics', 'label' => 'Google Analytics / Tracking Code', 'type' => 'textarea'],
@@ -686,7 +687,7 @@ final class AdminController extends Controller
     public function export(): string
     {
         $this->requireAuth();
-        $tables = ['settings', 'seo_settings', 'hosting_plans', 'domain_tlds', 'website_packages', 'pages', 'testimonials', 'faqs', 'blog_categories', 'blog_posts', 'inquiries'];
+        $tables = ['settings', 'seo_settings', 'hosting_plans', 'domain_tlds', 'website_packages', 'pages', 'testimonials', 'faqs', 'blog_categories', 'blog_posts', 'inquiries', 'customer_users', 'customer_orders', 'stripe_webhook_events'];
         $backup = [
             'generated_at' => date('c'),
             'site' => $this->content->settings()['company_name'] ?? 'Planetic Solutions',

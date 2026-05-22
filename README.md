@@ -1,6 +1,6 @@
 # Planetic Solutions Website
 
-Production-ready plain PHP/MySQL website for Planetic Solutions with a responsive hosting-company frontend, main-site checkout, WHMCS-backed billing/orders/domains/provisioning, SEO controls, blog, editable legal pages, contact inquiry storage and a secure admin CMS.
+Production-ready plain PHP/MySQL website for Planetic Solutions with a responsive hosting-company frontend, main-site checkout, on-site Stripe invoice payment, customer account pages, WHMCS-backed orders/domains/provisioning, SEO controls, blog, editable legal pages, contact inquiry storage and a secure admin CMS.
 
 ## Requirements
 
@@ -14,7 +14,7 @@ Production-ready plain PHP/MySQL website for Planetic Solutions with a responsiv
 1. Upload the project files to your cPanel site folder, usually `public_html`.
 2. Make sure `.htaccess` is uploaded. It protects `app/`, `database/`, `storage/` and `.env`.
 3. Create a MySQL database and user in cPanel.
-4. Import `database/schema.sql` into the database using phpMyAdmin. If you already imported an earlier version and only need the redesign content defaults, back up your database and import `database/redesign_update.sql`.
+4. Import `database/schema.sql` into the database using phpMyAdmin. If you already imported an earlier version, back up your database and import `database/stripe_account_update.sql` for the Stripe/account tables; import `database/redesign_update.sql` only if you also want the latest content defaults.
 5. Edit `.env` with your database credentials:
 
 ```env
@@ -48,6 +48,7 @@ In Admin > Settings and `.env`, configure:
 - WHMCS API Identifier
 - WHMCS API Secret
 - WHMCS payment gateway system name, for example `stripe` or `paypal`
+- WHMCS gateway name used when recording Stripe payments against invoices
 - Product IDs for hosting plans and the £199 website package
 
 The `.env` file should include:
@@ -62,12 +63,16 @@ WHMCS_API_SSL_VERIFY=true
 WHMCS_LOCAL_API_BRIDGE_URL=
 WHMCS_LOCAL_API_BRIDGE_TOKEN=
 WHMCS_PAYMENT_METHOD=stripe
+WHMCS_PAYMENT_GATEWAY_NAME=
 WHMCS_STARTER_HOSTING_PID=1
 WHMCS_BUSINESS_HOSTING_PID=2
 WHMCS_WORDPRESS_HOSTING_PID=3
 WHMCS_RESELLER_HOSTING_PID=4
 WHMCS_WEBSITE_PACKAGE_PID=5
 WHMCS_WEBSITE_PRICE_OVERRIDE=199.00
+STRIPE_PUBLISHABLE_KEY=
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
 ```
 
 The homepage domain form now sends visitors to:
@@ -107,7 +112,29 @@ Domain-only, hosting-only, domain + hosting and website package buttons now send
 
 `/checkout`
 
-The checkout page creates or finds the WHMCS client, calls `AddOrder`, and redirects the customer to the WHMCS invoice/payment page. WHMCS remains available for invoices, service management, support tickets and renewals.
+The checkout page creates or finds the WHMCS client, calls `AddOrder`, stores the returned invoice locally, and keeps the customer on the Planetic Solutions website for Stripe Payment Element checkout. WHMCS remains the backend for invoices, domains, service records, provisioning, renewals and support.
+
+## Stripe On-Site Payment
+
+Stripe keys are configured only in `.env`; never hard-code real keys:
+
+```env
+STRIPE_PUBLISHABLE_KEY=pk_live_or_test_xxx
+STRIPE_SECRET_KEY=sk_live_or_test_xxx
+STRIPE_WEBHOOK_SECRET=whsec_xxx
+WHMCS_PAYMENT_GATEWAY_NAME=your_whmcs_gateway_system_name
+```
+
+Webhook endpoint:
+
+`https://planeticsolution.com/stripe/webhook`
+
+Enable these Stripe webhook events:
+
+- `payment_intent.succeeded`
+- `payment_intent.payment_failed`
+
+The webhook verifies Stripe signatures, validates amount/currency against the saved invoice mapping, then records successful payments in WHMCS with `AddInvoicePayment`. Frontend redirects do not mark invoices as paid.
 
 Hosting and website package product IDs can be updated in:
 
@@ -125,6 +152,7 @@ Live domain checkout pricing should remain controlled inside WHMCS. The `/domain
 
 - Homepage hero, CTAs, service cards, trust badges and feature sections
 - Hosting plans with prices, features, WHMCS product mapping and highlighted badges
+- Customer accounts, local invoice/payment mappings and Stripe webhook event tracking tables
 - £199 website development package
 - TLD display prices and domain URLs
 - About and legal pages
@@ -164,7 +192,8 @@ Option 1: cPanel Git Version Control
 2. In cPanel, open Git Version Control and clone the repository into your site folder.
 3. Copy `.env.example` to `.env` if needed and fill in production values.
 4. Import `database/schema.sql`.
-   - If you already imported an earlier version and only want the redesign content defaults, import `database/redesign_update.sql` after backing up your database.
+   - If you already imported an earlier version, import `database/stripe_account_update.sql` after backing up your database.
+   - If you also want the latest content defaults, import `database/redesign_update.sql`.
 5. Pull future changes from cPanel Git Version Control.
 
 Option 2: Manual deploy
@@ -173,14 +202,17 @@ Option 2: Manual deploy
 2. Upload through cPanel File Manager.
 3. Extract into `public_html`.
 4. Edit `.env`.
-5. Import `database/schema.sql`.
+5. Import `database/schema.sql`, or import `database/stripe_account_update.sql` for an existing installation.
 
 ## Security Notes
 
 - `.htaccess` blocks direct access to application and database folders.
 - Admin passwords use PHP `password_hash()` / `password_verify()`.
 - Admin forms use CSRF tokens.
+- Customer login, registration, profile and billing payment actions use CSRF tokens where appropriate.
 - Database queries use PDO prepared statements.
+- Stripe secret and webhook keys remain server-side; card details are handled by Stripe and are never stored by the application.
+- Stripe webhook event IDs are stored to prevent duplicate processing.
 - Uploaded images are validated with `getimagesize()` and extension checks.
 - Contact form entries are escaped on output.
 - Rich page/blog/FAQ HTML is filtered to a safe allowlist before saving.
@@ -198,6 +230,7 @@ assets/
   css/style.css
   js/app.js
 database/schema.sql
+database/stripe_account_update.sql
 uploads/
 .env
 .htaccess
@@ -209,8 +242,9 @@ index.php
 1. Change the default admin login.
 2. Add your logo, favicon and Open Graph image in Admin > Settings.
 3. Update WHMCS product IDs for every hosting plan.
-4. Update the website package WHMCS product URL or switch it to inquiry flow.
-5. Replace placeholder testimonials with real client testimonials.
-6. Review legal pages with a qualified professional before publishing.
-7. Add Google Analytics/tracking code if required.
-8. Enable reCAPTCHA once your Google keys are ready.
+4. Add Stripe keys and configure the Stripe webhook.
+5. Set `WHMCS_PAYMENT_GATEWAY_NAME` to the exact WHMCS gateway system name you want recorded on invoice payments.
+6. Replace placeholder testimonials with real client testimonials.
+7. Review legal pages with a qualified professional before publishing.
+8. Add Google Analytics/tracking code if required.
+9. Enable reCAPTCHA once your Google keys are ready.

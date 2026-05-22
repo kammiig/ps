@@ -43,6 +43,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (checkoutForm) {
         initCheckoutForm(checkoutForm);
     }
+
+    const stripePayment = document.querySelector('[data-stripe-payment]');
+    if (stripePayment) {
+        initStripePayment(stripePayment);
+    }
 });
 
 function initCheckoutForm(form) {
@@ -174,7 +179,7 @@ function renderDomainResults(root, data) {
         : `${escapeHtml(data.searched)} is unavailable`;
     const badgeText = !availabilityChecked ? 'Check unavailable' : (available ? 'Available' : 'Taken');
     const messageText = !availabilityChecked
-        ? 'Live WHMCS availability must be confirmed before you can order this domain. Please try again shortly.'
+        ? 'Live availability must be confirmed before you can order this domain. Please try again shortly.'
         : available
             ? 'Secure it now or start a complete website package with the domain included.'
             : 'The exact match is taken, but these alternatives may still work for your business.';
@@ -286,7 +291,7 @@ function renderAlternativeRow(item) {
 
 function unavailableDomainText(item) {
     if (item.available === null || item.available === undefined) {
-        return 'Live WHMCS availability could not be confirmed for this extension.';
+        return 'Live availability could not be confirmed for this extension.';
     }
 
     return 'This exact domain is already registered.';
@@ -516,4 +521,76 @@ function focusNextCheckoutSection(form, button) {
     const target = next?.querySelector('input:not([type="hidden"]), select, textarea, button, a[href]');
     target?.focus({ preventScroll: true });
     next?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function initStripePayment(root) {
+    const form = document.querySelector('#stripe-payment-form');
+    const submit = document.querySelector('#stripe-submit');
+    const message = document.querySelector('#payment-message');
+    const publishableKey = root.dataset.publishableKey || '';
+    const clientSecret = root.dataset.clientSecret || '';
+    const returnUrl = root.dataset.returnUrl || window.location.href;
+    const failedUrl = root.dataset.failedUrl || '';
+
+    if (!form || !submit || !publishableKey || !clientSecret || typeof Stripe === 'undefined') {
+        if (message) {
+            message.hidden = false;
+            message.textContent = 'Secure payment could not be loaded. Please refresh or contact support.';
+        }
+        return;
+    }
+
+    const stripe = Stripe(publishableKey);
+    const elements = stripe.elements({
+        clientSecret,
+        appearance: {
+            theme: 'stripe',
+            variables: {
+                colorPrimary: '#087f75',
+                colorText: '#06172b',
+                borderRadius: '8px',
+                fontFamily: 'Inter, system-ui, sans-serif',
+            },
+        },
+    });
+    elements.create('payment').mount('#payment-element');
+
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        submit.disabled = true;
+        submit.dataset.originalText = submit.dataset.originalText || submit.textContent;
+        submit.textContent = 'Processing secure payment...';
+        if (message) {
+            message.hidden = true;
+            message.textContent = '';
+        }
+
+        const { error, paymentIntent } = await stripe.confirmPayment({
+            elements,
+            confirmParams: { return_url: returnUrl },
+            redirect: 'if_required',
+        });
+
+        if (error) {
+            if (message) {
+                message.hidden = false;
+                message.textContent = error.message || 'Payment could not be completed. Please check your details and try again.';
+            }
+            submit.disabled = false;
+            submit.textContent = submit.dataset.originalText;
+            return;
+        }
+
+        if (paymentIntent && paymentIntent.status === 'succeeded') {
+            window.location.href = returnUrl;
+            return;
+        }
+
+        if (paymentIntent && paymentIntent.status === 'requires_payment_method' && failedUrl) {
+            window.location.href = failedUrl;
+            return;
+        }
+
+        window.location.href = returnUrl;
+    });
 }

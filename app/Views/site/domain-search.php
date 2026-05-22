@@ -3,7 +3,7 @@
         <div class="domain-results-head">
             <span class="section-kicker">Domain search</span>
             <h1>Find and Register Your Domain</h1>
-            <p>Check domain availability on the Planetic Solutions website, choose domain-only or domain with hosting, then pay through the WHMCS-backed invoice flow.</p>
+            <p>Check domain availability on the Planetic Solutions website, choose domain-only or domain with hosting, then continue through secure on-site payment.</p>
             <form class="domain-search domain-result-search" action="<?= e(url('/domain-search')) ?>" method="get" role="search">
                 <label class="sr-only" for="domain-results-input">Search domain name</label>
                 <input id="domain-results-input" name="domain" type="text" inputmode="url" autocomplete="off" placeholder="Find your perfect domain" value="<?= e($domain ?? '') ?>" required>
@@ -16,7 +16,7 @@
                 <div class="domain-loading" role="status">
                     <span class="loader"></span>
                     <strong>Checking <?= e($domain) ?>...</strong>
-                    <p>Availability and live WHMCS pricing are loading.</p>
+                    <p>Availability and live pricing are loading.</p>
                 </div>
             <?php else: ?>
                 <div class="domain-empty">
