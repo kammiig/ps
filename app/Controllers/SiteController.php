@@ -359,7 +359,7 @@ final class SiteController extends Controller
         ]);
 
         if (!$client['ok']) {
-            return $this->checkout(['Unable to prepare your customer account. Please try again or contact support.'], $data);
+            return $this->checkout([$this->publicCustomerAccountError($client['message'] ?? '')], $data);
         }
 
         $orderPayload = $this->buildWhmcsOrderPayload($data);
@@ -784,6 +784,8 @@ final class SiteController extends Controller
 
     private function validateCheckout(array $input): array
     {
+        $phone = $this->normalisePhone((string) ($input['phone'] ?? ''), (string) ($input['country'] ?? 'GB'));
+        $postcode = $this->normalisePostcode((string) ($input['postcode'] ?? ''));
         $data = [
             'order_type' => trim((string) ($input['order_type'] ?? '')),
             'domain' => $this->normaliseDomain((string) ($input['domain'] ?? '')),
@@ -792,11 +794,11 @@ final class SiteController extends Controller
             'first_name' => trim((string) ($input['first_name'] ?? '')),
             'last_name' => trim((string) ($input['last_name'] ?? '')),
             'email' => trim((string) ($input['email'] ?? '')),
-            'phone' => trim((string) ($input['phone'] ?? '')),
+            'phone' => $phone,
             'address' => trim((string) ($input['address'] ?? '')),
             'city' => trim((string) ($input['city'] ?? '')),
             'state' => trim((string) ($input['state'] ?? '')),
-            'postcode' => trim((string) ($input['postcode'] ?? '')),
+            'postcode' => $postcode,
             'country' => strtoupper(trim((string) ($input['country'] ?? 'GB'))),
             'password' => (string) ($input['password'] ?? ''),
         ];
@@ -839,11 +841,73 @@ final class SiteController extends Controller
             $errors[] = 'Country must be a two-letter ISO code, for example GB.';
         }
 
+        $phoneDigits = preg_replace('/\D+/', '', $data['phone']);
+        if (strlen((string) $phoneDigits) < 7 || strlen((string) $phoneDigits) > 15) {
+            $errors[] = 'Enter a valid phone number.';
+        }
+
         if (strlen($data['password']) < 8) {
             $errors[] = 'Password must be at least 8 characters.';
         }
 
         return [$data, $errors];
+    }
+
+    private function normalisePhone(string $phone, string $country): string
+    {
+        $country = strtoupper(trim($country ?: 'GB'));
+        $callingCodes = [
+            'GB' => '44',
+            'US' => '1',
+            'CA' => '1',
+            'PK' => '92',
+            'IE' => '353',
+            'AU' => '61',
+        ];
+
+        $clean = preg_replace('/[^\d+]+/', '', trim($phone)) ?: '';
+        if (str_starts_with($clean, '00')) {
+            $clean = '+' . substr($clean, 2);
+        }
+
+        $digits = preg_replace('/\D+/', '', $clean) ?: '';
+        $callingCode = $callingCodes[$country] ?? '';
+        if ($callingCode !== '' && !str_starts_with($clean, '+')) {
+            if (str_starts_with($digits, '0')) {
+                $digits = $callingCode . ltrim($digits, '0');
+            } elseif (!str_starts_with($digits, $callingCode)) {
+                $digits = $callingCode . $digits;
+            }
+            $clean = '+' . $digits;
+        } elseif ($clean !== '' && !str_starts_with($clean, '+')) {
+            $clean = $digits;
+        }
+
+        return substr($clean, 0, 20);
+    }
+
+    private function normalisePostcode(string $postcode): string
+    {
+        $postcode = strtoupper(trim($postcode));
+        $postcode = preg_replace('/[^A-Z0-9 ]+/', '', $postcode) ?: '';
+        $postcode = preg_replace('/\s+/', ' ', $postcode) ?: '';
+        return substr(trim($postcode), 0, 20);
+    }
+
+    private function publicCustomerAccountError(string $message): string
+    {
+        $lower = strtolower($message);
+        if (str_contains($lower, 'phone') || str_contains($lower, 'telephone')) {
+            return 'Please enter a valid phone number with country code, then try again.';
+        }
+        if (str_contains($lower, 'postcode') || str_contains($lower, 'postal')) {
+            return 'Please enter a valid postcode using only letters, numbers and spaces.';
+        }
+        if (str_contains($lower, 'email') && (str_contains($lower, 'exists') || str_contains($lower, 'available'))) {
+            return 'An account already exists with this email address. Please log in or use a different email.';
+        }
+
+        return 'Unable to prepare your customer account. Please check your details and try again.';
     }
 
     private function buildWhmcsOrderPayload(array $data): array

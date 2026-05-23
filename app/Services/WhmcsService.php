@@ -187,7 +187,9 @@ final class WhmcsService
             'postcode' => $client['postcode'],
             'country' => $client['country'],
             'phonenumber' => $client['phonenumber'],
+            'country-calling-code' => $this->countryCallingCode((string) ($client['country'] ?? '')),
             'password2' => $client['password2'],
+            'skipvalidation' => true,
             'clientip' => $client['clientip'] ?? '',
             'responsetype' => 'json',
         ]);
@@ -645,6 +647,10 @@ final class WhmcsService
 
     private function safeApiMessage(string $message, bool $hasAccessKey): string
     {
+        if (str_contains(strtolower($message), 'bridge action is not allowed')) {
+            return 'The WHMCS local API bridge is outdated. Upload the latest planetic-local-api.php file to the WHMCS clientarea folder.';
+        }
+
         if (str_contains(strtolower($message), 'invalid ip')) {
             if ($hasAccessKey) {
                 return 'WHMCS is still rejecting the website server IP even though an API access key is configured. Check that the key in WHMCS configuration.php matches WHMCS_API_ACCESS_KEY exactly.';
@@ -654,6 +660,18 @@ final class WhmcsService
         }
 
         return $message;
+    }
+
+    private function countryCallingCode(string $country): string
+    {
+        return [
+            'GB' => '44',
+            'US' => '1',
+            'CA' => '1',
+            'PK' => '92',
+            'IE' => '353',
+            'AU' => '61',
+        ][strtoupper($country)] ?? '';
     }
 
     private function postApiRequest(string $apiUrl, string $payload, string $action): array

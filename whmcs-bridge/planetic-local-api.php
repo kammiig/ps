@@ -11,14 +11,25 @@ declare(strict_types=1);
  * WHMCS_LOCAL_API_BRIDGE_TOKEN=change_this_long_random_token
  */
 
+define('PLANETIC_BRIDGE_VERSION', '2026-05-23-invoice-payment-v3');
+
 $bridgeToken = 'change_this_long_random_token';
 $adminUsername = '';
 
 header('Content-Type: application/json; charset=UTF-8');
 
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['status'])) {
+    echo json_encode([
+        'result' => 'success',
+        'bridge' => 'planetic-local-api',
+        'version' => PLANETIC_BRIDGE_VERSION,
+    ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
-    echo json_encode(['result' => 'error', 'message' => 'Method not allowed.']);
+    echo json_encode(['result' => 'error', 'message' => 'Method not allowed.', 'version' => PLANETIC_BRIDGE_VERSION]);
     exit;
 }
 
@@ -44,7 +55,11 @@ $allowedActions = [
 $action = (string) ($_POST['action'] ?? '');
 if (!in_array($action, $allowedActions, true)) {
     http_response_code(403);
-    echo json_encode(['result' => 'error', 'message' => 'Bridge action is not allowed.']);
+    echo json_encode([
+        'result' => 'error',
+        'message' => 'Bridge action is not allowed. Upload the latest Planetic WHMCS bridge file.',
+        'version' => PLANETIC_BRIDGE_VERSION,
+    ]);
     exit;
 }
 
