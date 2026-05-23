@@ -271,33 +271,82 @@ final class WhmcsService
         return ['ok' => true, 'invoice' => $decoded];
     }
 
-    public function invoiceForClient(int $invoiceId, int $clientId): array
+    public function invoiceForClient(int $invoiceId, int $clientId, int $orderId = 0): array
     {
-        $invoice = $this->invoice($invoiceId);
-        if ($invoice['ok']) {
-            return $invoice;
-        }
+        $lastMessage = 'Unable to load invoice.';
 
-        $invoices = $this->invoicesForClient($clientId);
-        if (!$invoices['ok']) {
-            return [
-                'ok' => false,
-                'message' => $invoice['message'] ?? $invoices['message'] ?? 'Unable to load invoice.',
-            ];
-        }
-
-        foreach ($invoices['invoices'] as $clientInvoice) {
-            $candidateId = (int) ($clientInvoice['id'] ?? $clientInvoice['invoiceid'] ?? 0);
-            if ($candidateId === $invoiceId) {
-                $clientInvoice['invoiceid'] = $clientInvoice['invoiceid'] ?? $candidateId;
-                $clientInvoice['userid'] = $clientInvoice['userid'] ?? $clientId;
-                return ['ok' => true, 'invoice' => $clientInvoice, 'fallback' => true];
+        for ($attempt = 1; $attempt <= 3; $attempt++) {
+            $invoice = $this->invoice($invoiceId);
+            if ($invoice['ok']) {
+                return $invoice;
             }
+            $lastMessage = $invoice['message'] ?? $lastMessage;
+
+            $invoices = $this->invoicesForClient($clientId);
+            if ($invoices['ok']) {
+                foreach ($invoices['invoices'] as $clientInvoice) {
+                    $candidateId = (int) ($clientInvoice['id'] ?? $clientInvoice['invoiceid'] ?? 0);
+                    if ($candidateId === $invoiceId) {
+                        $clientInvoice['invoiceid'] = $clientInvoice['invoiceid'] ?? $candidateId;
+                        $clientInvoice['userid'] = $clientInvoice['userid'] ?? $clientId;
+                        return ['ok' => true, 'invoice' => $clientInvoice, 'fallback' => true];
+                    }
+                }
+            } else {
+                $lastMessage = $invoices['message'] ?? $lastMessage;
+            }
+
+            $bridgeInvoice = $this->bridgeInvoiceFallback($invoiceId, $clientId, $orderId);
+            if ($bridgeInvoice['ok']) {
+                return $bridgeInvoice;
+            }
+            $lastMessage = $bridgeInvoice['message'] ?? $lastMessage;
+
+            if ($orderId > 0) {
+                $order = $this->orderInvoiceFallback($orderId, $invoiceId, $clientId);
+                if ($order['ok']) {
+                    return $order;
+                }
+                $lastMessage = $order['message'] ?? $lastMessage;
+            }
+
+            usleep(350000);
         }
+
+        $this->logError('WHMCS invoice could not be loaded after order creation.', [
+            'invoice_id' => $invoiceId,
+            'client_id' => $clientId,
+            'message' => $lastMessage,
+        ]);
 
         return [
             'ok' => false,
-            'message' => 'Unable to load invoice.',
+            'message' => $lastMessage,
+        ];
+    }
+
+    private function bridgeInvoiceFallback(int $invoiceId, int $clientId, int $orderId = 0): array
+    {
+        if (!$this->hasBridge()) {
+            return ['ok' => false, 'message' => 'The WHMCS bridge is not configured.'];
+        }
+
+        $decoded = $this->callApi([
+            'action' => 'PlaneticGetInvoice',
+            'invoiceid' => $invoiceId,
+            'clientid' => $clientId,
+            'orderid' => $orderId,
+            'responsetype' => 'json',
+        ]);
+
+        if (($decoded['result'] ?? '') !== 'success') {
+            return ['ok' => false, 'message' => $decoded['message'] ?? 'Unable to load invoice through the WHMCS bridge.'];
+        }
+
+        return [
+            'ok' => true,
+            'fallback' => 'bridge_invoice',
+            'invoice' => $decoded['invoice'] ?? [],
         ];
     }
 
@@ -315,8 +364,82 @@ final class WhmcsService
 
         return [
             'ok' => true,
-            'invoices' => $decoded['invoices']['invoice'] ?? [],
+            'invoices' => $this->normaliseApiList($decoded['invoices']['invoice'] ?? []),
         ];
+    }
+
+    public function order(int $orderId): array
+    {
+        $decoded = $this->callApi([
+            'action' => 'GetOrders',
+            'id' => $orderId,
+            'orderid' => $orderId,
+            'responsetype' => 'json',
+        ]);
+
+        if (($decoded['result'] ?? '') !== 'success') {
+            return ['ok' => false, 'message' => $decoded['message'] ?? 'Unable to load order.'];
+        }
+
+        return [
+            'ok' => true,
+            'orders' => $this->normaliseApiList($decoded['orders']['order'] ?? []),
+        ];
+    }
+
+    private function orderInvoiceFallback(int $orderId, int $invoiceId, int $clientId): array
+    {
+        $orders = $this->order($orderId);
+        if (!$orders['ok']) {
+            return $orders;
+        }
+
+        foreach ($orders['orders'] as $order) {
+            $orderInvoiceId = (int) ($order['invoiceid'] ?? $order['invoice_id'] ?? 0);
+            $orderClientId = (int) ($order['userid'] ?? $order['clientid'] ?? $order['client_id'] ?? 0);
+
+            if ($orderInvoiceId !== $invoiceId) {
+                continue;
+            }
+
+            if ($orderClientId > 0 && $orderClientId !== $clientId) {
+                continue;
+            }
+
+            $amount = 0.0;
+            foreach (['amount', 'total', 'subtotal'] as $key) {
+                if (isset($order[$key]) && is_numeric($order[$key]) && (float) $order[$key] > 0) {
+                    $amount = round((float) $order[$key], 2);
+                    break;
+                }
+            }
+
+            if ($amount <= 0) {
+                return ['ok' => false, 'message' => 'The order was found, but no payable amount was returned.'];
+            }
+
+            return [
+                'ok' => true,
+                'fallback' => 'order',
+                'invoice' => [
+                    'invoiceid' => $invoiceId,
+                    'id' => $invoiceId,
+                    'userid' => $clientId,
+                    'clientid' => $clientId,
+                    'orderid' => $orderId,
+                    'total' => number_format($amount, 2, '.', ''),
+                    'balance' => number_format($amount, 2, '.', ''),
+                    'status' => $order['paymentstatus'] ?? $order['status'] ?? 'Unpaid',
+                    'currency' => $order['currency'] ?? [
+                        'code' => $order['currencycode'] ?? 'GBP',
+                        'prefix' => $order['currencyprefix'] ?? '',
+                        'suffix' => $order['currencysuffix'] ?? '',
+                    ],
+                ],
+            ];
+        }
+
+        return ['ok' => false, 'message' => 'Unable to load invoice amount from the WHMCS order.'];
     }
 
     public function productsForClient(int $clientId): array
@@ -333,7 +456,7 @@ final class WhmcsService
 
         return [
             'ok' => true,
-            'products' => $decoded['products']['product'] ?? [],
+            'products' => $this->normaliseApiList($decoded['products']['product'] ?? []),
         ];
     }
 
@@ -351,7 +474,7 @@ final class WhmcsService
 
         return [
             'ok' => true,
-            'domains' => $decoded['domains']['domain'] ?? [],
+            'domains' => $this->normaliseApiList($decoded['domains']['domain'] ?? []),
         ];
     }
 
@@ -619,7 +742,20 @@ final class WhmcsService
 
     private function canRetryApiAction(string $action): bool
     {
-        return in_array($action, ['DomainWhois', 'GetTLDPricing', 'GetProducts', 'GetClientsDetails', 'GetInvoice', 'GetInvoices', 'GetClientsProducts', 'GetClientsDomains'], true);
+        return in_array($action, ['DomainWhois', 'GetTLDPricing', 'GetProducts', 'GetClientsDetails', 'GetInvoice', 'GetInvoices', 'GetOrders', 'PlaneticGetInvoice', 'GetClientsProducts', 'GetClientsDomains'], true);
+    }
+
+    private function normaliseApiList(mixed $items): array
+    {
+        if (!is_array($items) || $items === []) {
+            return [];
+        }
+
+        if (array_keys($items) === range(0, count($items) - 1)) {
+            return $items;
+        }
+
+        return [$items];
     }
 
     private function streamHttpStatus(array $headers): int
@@ -661,6 +797,11 @@ final class WhmcsService
     {
         $configured = trim((string) ($this->settings['whmcs_local_api_bridge_token'] ?? ''));
         return $configured !== '' ? $configured : trim((string) ($this->config['local_bridge_token'] ?? env('WHMCS_LOCAL_API_BRIDGE_TOKEN', '')));
+    }
+
+    private function hasBridge(): bool
+    {
+        return $this->bridgeUrl() !== '' && $this->bridgeToken() !== '';
     }
 
     private function logError(string $message, array $context = []): void

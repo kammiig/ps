@@ -34,6 +34,8 @@ $allowedActions = [
     'CreateSsoToken',
     'GetInvoice',
     'GetInvoices',
+    'GetOrders',
+    'PlaneticGetInvoice',
     'GetClientsProducts',
     'GetClientsDomains',
     'UpdateClient',
@@ -59,6 +61,13 @@ if (isset($planetic_bridge_token) && is_string($planetic_bridge_token) && $plane
     $bridgeToken = $planetic_bridge_token;
 }
 
+if (isset($planetic_bridge_admin) && is_string($planetic_bridge_admin) && $planetic_bridge_admin !== '') {
+    $adminUsername = $planetic_bridge_admin;
+}
+if (isset($planetic_bridge_admin_username) && is_string($planetic_bridge_admin_username) && $planetic_bridge_admin_username !== '') {
+    $adminUsername = $planetic_bridge_admin_username;
+}
+
 $providedToken = (string) ($_POST['bridge_token'] ?? '');
 if ($bridgeToken === 'change_this_long_random_token' || !hash_equals($bridgeToken, $providedToken)) {
     http_response_code(403);
@@ -77,7 +86,91 @@ unset(
     $params['responsetype']
 );
 
+if ($action === 'PlaneticGetInvoice') {
+    $invoiceId = (int) ($params['invoiceid'] ?? 0);
+    $clientId = (int) ($params['clientid'] ?? $params['userid'] ?? 0);
+    $orderId = (int) ($params['orderid'] ?? 0);
+
+    if ($invoiceId <= 0 || $clientId <= 0) {
+        http_response_code(422);
+        echo json_encode(['result' => 'error', 'message' => 'Invoice ID and client ID are required.']);
+        exit;
+    }
+
+    try {
+        if (!class_exists('\WHMCS\Database\Capsule')) {
+            throw new RuntimeException('WHMCS database layer is unavailable.');
+        }
+
+        $invoiceRow = \WHMCS\Database\Capsule::table('tblinvoices')
+            ->where('id', $invoiceId)
+            ->where('userid', $clientId)
+            ->first();
+
+        if (!$invoiceRow) {
+            echo json_encode(['result' => 'error', 'message' => 'Invoice not found.']);
+            exit;
+        }
+
+        $invoice = (array) $invoiceRow;
+        $status = (string) ($invoice['status'] ?? 'Unpaid');
+        $total = round((float) ($invoice['total'] ?? 0), 2);
+        $credit = round((float) ($invoice['credit'] ?? 0), 2);
+        $balance = strtolower($status) === 'paid' ? 0.0 : max(0.0, round($total - $credit, 2));
+
+        $currencyId = (int) \WHMCS\Database\Capsule::table('tblclients')
+            ->where('id', $clientId)
+            ->value('currency');
+        $currencyRow = $currencyId > 0
+            ? \WHMCS\Database\Capsule::table('tblcurrencies')->where('id', $currencyId)->first()
+            : null;
+        $currency = $currencyRow ? (array) $currencyRow : [];
+
+        echo json_encode([
+            'result' => 'success',
+            'invoice' => [
+                'invoiceid' => $invoiceId,
+                'id' => $invoiceId,
+                'userid' => $clientId,
+                'clientid' => $clientId,
+                'orderid' => $orderId,
+                'invoicenum' => $invoice['invoicenum'] ?? '',
+                'date' => $invoice['date'] ?? '',
+                'duedate' => $invoice['duedate'] ?? '',
+                'subtotal' => number_format((float) ($invoice['subtotal'] ?? $total), 2, '.', ''),
+                'credit' => number_format($credit, 2, '.', ''),
+                'total' => number_format($total, 2, '.', ''),
+                'balance' => number_format($balance, 2, '.', ''),
+                'status' => $status,
+                'paymentmethod' => $invoice['paymentmethod'] ?? '',
+                'currencycode' => (string) ($currency['code'] ?? 'GBP'),
+                'currency' => [
+                    'code' => (string) ($currency['code'] ?? 'GBP'),
+                    'prefix' => (string) ($currency['prefix'] ?? ''),
+                    'suffix' => (string) ($currency['suffix'] ?? ''),
+                ],
+            ],
+        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        exit;
+    } catch (Throwable) {
+        http_response_code(500);
+        echo json_encode(['result' => 'error', 'message' => 'Bridge invoice lookup failed.']);
+        exit;
+    }
+}
+
 try {
+    if ($adminUsername === '' && class_exists('\WHMCS\Database\Capsule')) {
+        try {
+            $adminUsername = (string) \WHMCS\Database\Capsule::table('tbladmins')
+                ->where('disabled', 0)
+                ->orderBy('id')
+                ->value('username');
+        } catch (Throwable) {
+            $adminUsername = '';
+        }
+    }
+
     $response = $adminUsername !== ''
         ? localAPI($action, $params, $adminUsername)
         : localAPI($action, $params);
