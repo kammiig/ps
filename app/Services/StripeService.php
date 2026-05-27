@@ -26,6 +26,10 @@ final class StripeService
     public function paymentIntentForOrder(array $order): array
     {
         if (!$this->configured()) {
+            $this->log('Stripe payment is not configured.', [
+                'publishable_key_configured' => $this->publishableKey() !== '',
+                'secret_key_configured' => $this->secretKey() !== '',
+            ]);
             return ['ok' => false, 'message' => 'Stripe payment is not configured yet.'];
         }
 
@@ -203,6 +207,7 @@ final class StripeService
                 'http_status' => $status,
                 'type' => $decoded['error']['type'] ?? '',
                 'code' => $decoded['error']['code'] ?? '',
+                'message' => $decoded['error']['message'] ?? '',
             ]);
             return ['ok' => false, 'message' => 'Stripe could not prepare this payment. Please try again.'];
         }

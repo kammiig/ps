@@ -69,7 +69,7 @@ final class PaymentController extends Controller
         if (!$intent['ok']) {
             return $this->render('site/payment-failed', $this->baseData('checkout', [
                 'order' => $order,
-                'message' => 'Secure card payment is not available right now. Please contact support.',
+                'message' => $this->paymentSetupMessage((string) ($intent['message'] ?? '')),
             ]));
         }
 
@@ -281,6 +281,15 @@ final class PaymentController extends Controller
 
         $localOrderId = (int) ($intent['metadata']['local_order_id'] ?? 0);
         return $localOrderId > 0 ? $this->payments->find($localOrderId) : null;
+    }
+
+    private function paymentSetupMessage(string $message): string
+    {
+        if (str_contains(strtolower($message), 'not configured')) {
+            return 'Secure card payment is not configured yet. Please contact support.';
+        }
+
+        return 'Secure card payment is not available right now. Please contact support.';
     }
 
     private function refreshInvoiceAmount(array $order): array
