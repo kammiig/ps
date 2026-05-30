@@ -286,6 +286,7 @@ final class SiteController extends Controller
         }
 
         $old = array_merge($query, $old);
+        $old = $this->applyLoggedInCustomerDefaults($old);
         unset($old['password']);
 
         return $this->render('site/checkout', $this->baseData('checkout', [
@@ -344,19 +345,7 @@ final class SiteController extends Controller
             }
         }
 
-        $client = $this->whmcs->createOrFindClient([
-            'firstname' => $data['first_name'],
-            'lastname' => $data['last_name'],
-            'email' => $data['email'],
-            'address1' => $data['address'],
-            'city' => $data['city'],
-            'state' => $data['state'],
-            'postcode' => $data['postcode'],
-            'country' => $data['country'],
-            'phonenumber' => $data['phone'],
-            'password2' => $data['password'],
-            'clientip' => $_SERVER['REMOTE_ADDR'] ?? '',
-        ]);
+        $client = $this->prepareWhmcsClientForCheckout($data);
 
         if (!$client['ok']) {
             return $this->checkout([$this->publicCustomerAccountError($client['message'] ?? '')], $data);
@@ -691,10 +680,6 @@ final class SiteController extends Controller
     {
         $auth = new CustomerAuth();
         $current = $auth->user();
-        if ($current && strtolower((string) $current['email']) !== strtolower((string) $data['email'])) {
-            return ['ok' => false, 'message' => 'Please use the email address for your logged-in account, or log out before ordering for another customer.'];
-        }
-
         if ($current) {
             return ['ok' => true];
         }
@@ -705,6 +690,36 @@ final class SiteController extends Controller
         }
 
         return ['ok' => true];
+    }
+
+    private function prepareWhmcsClientForCheckout(array $data): array
+    {
+        $current = (new CustomerAuth())->user();
+        if ($current) {
+            $user = (new CustomerRepository())->find((int) $current['id']);
+            if ($user && !empty($user['whmcs_client_id'])) {
+                return [
+                    'ok' => true,
+                    'client_id' => (int) $user['whmcs_client_id'],
+                    'created' => false,
+                    'source' => 'local_account',
+                ];
+            }
+        }
+
+        return $this->whmcs->createOrFindClient([
+            'firstname' => $data['first_name'],
+            'lastname' => $data['last_name'],
+            'email' => $data['email'],
+            'address1' => $data['address'],
+            'city' => $data['city'],
+            'state' => $data['state'],
+            'postcode' => $data['postcode'],
+            'country' => $data['country'],
+            'phonenumber' => $data['phone'],
+            'password2' => $data['password'],
+            'clientip' => $_SERVER['REMOTE_ADDR'] ?? '',
+        ]);
     }
 
     private function invoiceAmountDue(array $invoice): float
@@ -784,6 +799,7 @@ final class SiteController extends Controller
 
     private function validateCheckout(array $input): array
     {
+        $currentCustomer = (new CustomerAuth())->user();
         $phone = $this->normalisePhone((string) ($input['phone'] ?? ''), (string) ($input['country'] ?? 'GB'));
         $postcode = $this->normalisePostcode((string) ($input['postcode'] ?? ''));
         $data = [
@@ -802,6 +818,11 @@ final class SiteController extends Controller
             'country' => strtoupper(trim((string) ($input['country'] ?? 'GB'))),
             'password' => (string) ($input['password'] ?? ''),
         ];
+
+        if ($currentCustomer) {
+            $data['email'] = (string) ($currentCustomer['email'] ?? $data['email']);
+            $data['password'] = '';
+        }
 
         $errors = [];
         if (!in_array($data['order_type'], ['domain', 'hosting', 'bundle', 'website'], true)) {
@@ -846,11 +867,45 @@ final class SiteController extends Controller
             $errors[] = 'Enter a valid phone number.';
         }
 
-        if (strlen($data['password']) < 8) {
+        if (!$currentCustomer && strlen($data['password']) < 8) {
             $errors[] = 'Password must be at least 8 characters.';
         }
 
         return [$data, $errors];
+    }
+
+    private function applyLoggedInCustomerDefaults(array $old): array
+    {
+        $current = (new CustomerAuth())->user();
+        if (!$current) {
+            return $old;
+        }
+
+        $full = (new CustomerRepository())->find((int) $current['id']);
+        if (!$full) {
+            return $old;
+        }
+
+        $defaults = [
+            'first_name' => $full['first_name'] ?? '',
+            'last_name' => $full['last_name'] ?? '',
+            'email' => $full['email'] ?? '',
+            'phone' => $full['phone'] ?? '',
+            'address' => $full['address'] ?? '',
+            'city' => $full['city'] ?? '',
+            'state' => $full['state'] ?? '',
+            'postcode' => $full['postcode'] ?? '',
+            'country' => $full['country'] ?? 'GB',
+        ];
+
+        foreach ($defaults as $key => $value) {
+            if ($value !== '') {
+                $old[$key] = $value;
+            }
+        }
+
+        $old['email'] = (string) ($defaults['email'] ?: ($current['email'] ?? ''));
+        return $old;
     }
 
     private function normalisePhone(string $phone, string $country): string

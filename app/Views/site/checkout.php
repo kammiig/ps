@@ -1,5 +1,6 @@
 <?php
 $orderType = $old['order_type'] ?? 'bundle';
+$isCustomerLoggedIn = !empty($customerUser);
 $selectedPlan = $old['hosting_plan'] ?? ($plans[0]['slug'] ?? '');
 $domain = $old['domain'] ?? '';
 $billingCycle = strtolower((string) ($old['billing_cycle'] ?? $checkoutConfig['default_billing_cycle'] ?? 'monthly'));
@@ -27,6 +28,9 @@ $websitePackageSummary = [
 ];
 $domainPricingJson = e(json_encode($checkoutConfig['domain_pricing'] ?? [], JSON_UNESCAPED_SLASHES));
 $websitePackageJson = e(json_encode($websitePackageSummary, JSON_UNESCAPED_SLASHES));
+$accountNotice = $isCustomerLoggedIn
+    ? 'Your saved account details have been loaded automatically. Update them from My Account if anything has changed.'
+    : '';
 ?>
 <section class="checkout-page">
     <div class="container">
@@ -139,9 +143,12 @@ $websitePackageJson = e(json_encode($websitePackageSummary, JSON_UNESCAPED_SLASH
                         </div>
                     </div>
                     <div class="checkout-form-grid">
+                        <?php if ($accountNotice !== ''): ?>
+                            <p class="checkout-help wide"><?= e($accountNotice) ?></p>
+                        <?php endif; ?>
                         <label><span>First name</span><input name="first_name" value="<?= e($old['first_name'] ?? '') ?>" autocomplete="given-name" required></label>
                         <label><span>Last name</span><input name="last_name" value="<?= e($old['last_name'] ?? '') ?>" autocomplete="family-name" required></label>
-                        <label><span>Email</span><input name="email" type="email" value="<?= e($old['email'] ?? '') ?>" autocomplete="email" required></label>
+                        <label><span>Email</span><input name="email" type="email" value="<?= e($old['email'] ?? '') ?>" autocomplete="<?= $isCustomerLoggedIn ? 'off' : 'email' ?>" <?= $isCustomerLoggedIn ? 'readonly aria-describedby="checkout-email-help"' : '' ?> required></label>
                         <label><span>Phone</span><input name="phone" value="<?= e($old['phone'] ?? '') ?>" autocomplete="tel" required></label>
                         <label class="wide"><span>Address</span><input name="address" value="<?= e($old['address'] ?? '') ?>" autocomplete="address-line1" required></label>
                         <label><span>City</span><input name="city" value="<?= e($old['city'] ?? '') ?>" autocomplete="address-level2" required></label>
@@ -155,7 +162,15 @@ $websitePackageJson = e(json_encode($websitePackageSummary, JSON_UNESCAPED_SLASH
                                 <?php endforeach; ?>
                             </select>
                         </label>
-                        <label class="wide"><span>Password</span><input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
+                        <?php if ($isCustomerLoggedIn): ?>
+                            <p id="checkout-email-help" class="checkout-help wide">This order will be added to your logged-in Planetic Solutions account.</p>
+                        <?php else: ?>
+                            <label class="wide password-field">
+                                <span>Password</span>
+                                <input id="checkout-password" name="password" type="password" autocomplete="new-password" minlength="8" required>
+                                <button class="password-toggle" type="button" data-password-toggle data-password-target="checkout-password" aria-label="Show password" aria-pressed="false">Show</button>
+                            </label>
+                        <?php endif; ?>
                     </div>
                 </section>
             </div>

@@ -44,11 +44,32 @@ document.addEventListener('DOMContentLoaded', () => {
         initCheckoutForm(checkoutForm);
     }
 
+    initPasswordToggles();
+
     const stripePayment = document.querySelector('[data-stripe-payment]');
     if (stripePayment) {
         initStripePayment(stripePayment);
     }
 });
+
+function initPasswordToggles() {
+    document.querySelectorAll('[data-password-toggle]').forEach((button) => {
+        const targetId = button.getAttribute('data-password-target') || '';
+        const input = targetId ? document.getElementById(targetId) : button.previousElementSibling;
+        if (!(input instanceof HTMLInputElement)) {
+            return;
+        }
+
+        button.addEventListener('click', () => {
+            const show = input.type === 'password';
+            input.type = show ? 'text' : 'password';
+            button.textContent = show ? 'Hide' : 'Show';
+            button.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+            button.setAttribute('aria-pressed', String(show));
+            input.focus();
+        });
+    });
+}
 
 function initCheckoutForm(form) {
     const typeInputs = [...form.querySelectorAll('input[name="order_type"]')];

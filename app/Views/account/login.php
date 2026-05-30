@@ -15,7 +15,11 @@
                 <?= \App\Core\Csrf::field() ?>
                 <input type="hidden" name="next" value="<?= e($next ?? '') ?>">
                 <label><span>Email</span><input name="email" type="email" autocomplete="email" value="<?= e($old['email'] ?? '') ?>" required></label>
-                <label><span>Password</span><input name="password" type="password" autocomplete="current-password" required></label>
+                <label class="password-field">
+                    <span>Password</span>
+                    <input id="account-login-password" name="password" type="password" autocomplete="current-password" required>
+                    <button class="password-toggle" type="button" data-password-toggle data-password-target="account-login-password" aria-label="Show password" aria-pressed="false">Show</button>
+                </label>
                 <button class="btn btn-primary" type="submit">Login <?= icon('arrow') ?></button>
             </form>
 

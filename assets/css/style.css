@@ -1814,6 +1814,35 @@ textarea {
     grid-column: 1 / -1;
 }
 
+.password-field {
+    position: relative;
+}
+
+.password-field input {
+    padding-right: 82px;
+}
+
+.password-toggle {
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    min-height: 38px;
+    padding: 0 14px;
+    color: var(--teal-dark);
+    background: var(--mint);
+    border: 1px solid rgba(18, 184, 166, .35);
+    border-radius: 8px;
+    font-size: .85rem;
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.password-toggle:hover,
+.password-toggle:focus-visible {
+    color: var(--white);
+    background: var(--button-teal);
+}
+
 .checkout-summary {
     position: sticky;
     top: 104px;

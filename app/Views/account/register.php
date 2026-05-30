@@ -31,8 +31,16 @@
                             <?php endforeach; ?>
                         </select>
                     </label>
-                    <label><span>Password</span><input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
-                    <label><span>Confirm password</span><input name="password_confirmation" type="password" autocomplete="new-password" minlength="8" required></label>
+                    <label class="password-field">
+                        <span>Password</span>
+                        <input id="account-register-password" name="password" type="password" autocomplete="new-password" minlength="8" required>
+                        <button class="password-toggle" type="button" data-password-toggle data-password-target="account-register-password" aria-label="Show password" aria-pressed="false">Show</button>
+                    </label>
+                    <label class="password-field">
+                        <span>Confirm password</span>
+                        <input id="account-register-password-confirmation" name="password_confirmation" type="password" autocomplete="new-password" minlength="8" required>
+                        <button class="password-toggle" type="button" data-password-toggle data-password-target="account-register-password-confirmation" aria-label="Show password confirmation" aria-pressed="false">Show</button>
+                    </label>
                 </div>
                 <button class="btn btn-primary" type="submit">Create Account <?= icon('arrow') ?></button>
             </form>
