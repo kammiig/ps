@@ -31,6 +31,12 @@ $websitePackageJson = e(json_encode($websitePackageSummary, JSON_UNESCAPED_SLASH
 $accountNotice = $isCustomerLoggedIn
     ? 'Your saved account details have been loaded automatically. Update them from My Account if anything has changed.'
     : '';
+$requestUri = (string) ($_SERVER['REQUEST_URI'] ?? '/checkout');
+$requestPath = parse_url($requestUri, PHP_URL_PATH) ?: '/checkout';
+$requestQuery = [];
+parse_str((string) (parse_url($requestUri, PHP_URL_QUERY) ?: ''), $requestQuery);
+unset($requestQuery['login_error']);
+$checkoutNext = $requestPath . ($requestQuery ? '?' . http_build_query($requestQuery) : '');
 ?>
 <section class="checkout-page">
     <div class="container">
@@ -43,6 +49,31 @@ $accountNotice = $isCustomerLoggedIn
         <?php if ($errors): ?>
             <div class="notice error checkout-notice" role="alert">
                 <?php foreach ($errors as $error): ?><p><?= e($error) ?></p><?php endforeach; ?>
+            </div>
+        <?php endif; ?>
+
+        <?php if (!$isCustomerLoggedIn): ?>
+            <div class="checkout-login-card">
+                <div>
+                    <span class="section-kicker">Existing customer</span>
+                    <h2>Sign in for faster checkout</h2>
+                    <p>Use your Planetic Solutions account to load your saved details and keep this order under the same account.</p>
+                </div>
+                <form action="<?= e(url('/account/login')) ?>" method="post">
+                    <input type="hidden" name="_csrf" value="<?= e($csrfToken) ?>">
+                    <input type="hidden" name="context" value="checkout">
+                    <input type="hidden" name="next" value="<?= e($checkoutNext) ?>">
+                    <label>
+                        <span>Email</span>
+                        <input name="email" type="email" autocomplete="email" required>
+                    </label>
+                    <label class="password-field">
+                        <span>Password</span>
+                        <input id="checkout-existing-password" name="password" type="password" autocomplete="current-password" required>
+                        <button class="password-toggle" type="button" data-password-toggle data-password-target="checkout-existing-password" aria-label="Show password" aria-pressed="false">Show</button>
+                    </label>
+                    <button class="btn btn-primary" type="submit">Login & Continue <?= icon('arrow') ?></button>
+                </form>
             </div>
         <?php endif; ?>
 

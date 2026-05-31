@@ -35,6 +35,11 @@ final class AccountController extends Controller
 
     public function login(array $errors = [], array $old = []): string
     {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST' && $this->auth->check()) {
+            $next = $this->safeNext((string) ($_GET['next'] ?? $old['next'] ?? ''));
+            $this->redirect($next ?: url('/account/dashboard'));
+        }
+
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!Csrf::verify($_POST['_csrf'] ?? null)) {
                 return $this->login(['Your security token expired. Please try again.'], $_POST);
@@ -53,6 +58,11 @@ final class AccountController extends Controller
             }
 
             RateLimiter::hit('customer_login', $identifier, 900);
+            $next = $this->safeNext((string) ($_POST['next'] ?? $_GET['next'] ?? ''));
+            if ((string) ($_POST['context'] ?? '') === 'checkout' && str_starts_with($next, '/checkout')) {
+                $this->redirect($this->withQueryFlag($next, 'login_error', '1'));
+            }
+
             return $this->login(['Email or password is incorrect.'], $_POST);
         }
 
@@ -173,8 +183,8 @@ final class AccountController extends Controller
     {
         $user = $this->requireCustomer();
         $account = $this->fullUser($user);
-        $services = $this->clientServices($account);
-        $invoices = $this->clientInvoices($account);
+        $services = $this->clientServices($account, false);
+        $invoices = $this->clientInvoices($account, false);
         $recentPayments = $this->payments->recentForCustomer((int) $account['id'], 3);
 
         return $this->render('account/dashboard', $this->baseData('account-dashboard', [
@@ -256,34 +266,64 @@ final class AccountController extends Controller
         ]));
     }
 
-    private function clientServices(array $account): array
+    private function clientServices(array $account, bool $allowLiveLoad = true): array
     {
         if (empty($account['whmcs_client_id'])) {
             return [];
         }
 
-        $result = $this->whmcs->productsForClient((int) $account['whmcs_client_id']);
+        $clientId = (int) $account['whmcs_client_id'];
+        $result = $this->cachedWhmcsRead($clientId, 'products', fn (): array => $this->whmcs->productsForClient($clientId), $allowLiveLoad);
         return $result['ok'] ? array_map([$this, 'friendlyService'], $result['products']) : [];
     }
 
-    private function clientDomains(array $account): array
+    private function clientDomains(array $account, bool $allowLiveLoad = true): array
     {
         if (empty($account['whmcs_client_id'])) {
             return [];
         }
 
-        $result = $this->whmcs->domainsForClient((int) $account['whmcs_client_id']);
+        $clientId = (int) $account['whmcs_client_id'];
+        $result = $this->cachedWhmcsRead($clientId, 'domains', fn (): array => $this->whmcs->domainsForClient($clientId), $allowLiveLoad);
         return $result['ok'] ? $result['domains'] : [];
     }
 
-    private function clientInvoices(array $account): array
+    private function clientInvoices(array $account, bool $allowLiveLoad = true): array
     {
         if (empty($account['whmcs_client_id'])) {
             return [];
         }
 
-        $result = $this->whmcs->invoicesForClient((int) $account['whmcs_client_id']);
+        $clientId = (int) $account['whmcs_client_id'];
+        $result = $this->cachedWhmcsRead($clientId, 'invoices', fn (): array => $this->whmcs->invoicesForClient($clientId), $allowLiveLoad);
         return $result['ok'] ? $result['invoices'] : [];
+    }
+
+    private function cachedWhmcsRead(int $clientId, string $key, callable $loader, bool $allowLiveLoad = true): array
+    {
+        $cacheDir = STORAGE_PATH . '/cache/account-whmcs';
+        if (!is_dir($cacheDir)) {
+            @mkdir($cacheDir, 0755, true);
+        }
+
+        $file = $cacheDir . '/' . sha1($clientId . ':' . $key) . '.json';
+        $cached = is_file($file) ? json_decode((string) @file_get_contents($file), true) : null;
+        if (is_array($cached) && (int) ($cached['expires_at'] ?? 0) > time() && isset($cached['payload']) && is_array($cached['payload'])) {
+            return $cached['payload'];
+        }
+
+        if (!$allowLiveLoad) {
+            return ['ok' => false, $key => []];
+        }
+
+        $payload = $loader();
+        $ttl = !empty($payload['ok']) ? 120 : 45;
+        @file_put_contents($file, json_encode([
+            'expires_at' => time() + $ttl,
+            'payload' => $payload,
+        ], JSON_UNESCAPED_SLASHES));
+
+        return $payload;
     }
 
     private function friendlyService(array $service): array
@@ -377,6 +417,12 @@ final class AccountController extends Controller
     {
         $next = trim($next);
         return str_starts_with($next, '/') && !str_starts_with($next, '//') ? $next : '';
+    }
+
+    private function withQueryFlag(string $path, string $key, string $value): string
+    {
+        $separator = str_contains($path, '?') ? '&' : '?';
+        return url($path . $separator . rawurlencode($key) . '=' . rawurlencode($value));
     }
 
     private function nextDueDate(array $services): string

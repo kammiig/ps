@@ -327,6 +327,60 @@ final class WhmcsService
         ];
     }
 
+    public function invoiceForOrder(int $orderId, int $clientId): array
+    {
+        if ($orderId <= 0 || $clientId <= 0) {
+            return ['ok' => false, 'message' => 'Order and client references are required.'];
+        }
+
+        $lastMessage = 'Unable to load invoice for this order.';
+
+        for ($attempt = 1; $attempt <= 3; $attempt++) {
+            $bridgeInvoice = $this->bridgeOrderInvoiceFallback($orderId, $clientId);
+            if ($bridgeInvoice['ok']) {
+                return $bridgeInvoice;
+            }
+            $lastMessage = $bridgeInvoice['message'] ?? $lastMessage;
+
+            $orders = $this->order($orderId);
+            if ($orders['ok']) {
+                foreach ($orders['orders'] as $order) {
+                    $orderClientId = (int) ($order['userid'] ?? $order['clientid'] ?? $order['client_id'] ?? 0);
+                    if ($orderClientId > 0 && $orderClientId !== $clientId) {
+                        continue;
+                    }
+
+                    $invoiceId = (int) ($order['invoiceid'] ?? $order['invoice_id'] ?? 0);
+                    if ($invoiceId <= 0) {
+                        continue;
+                    }
+
+                    $invoice = $this->invoiceForClient($invoiceId, $clientId, $orderId);
+                    if ($invoice['ok']) {
+                        return $invoice;
+                    }
+
+                    $lastMessage = $invoice['message'] ?? $lastMessage;
+                }
+            } else {
+                $lastMessage = $orders['message'] ?? $lastMessage;
+            }
+
+            usleep(350000);
+        }
+
+        $this->logError('WHMCS invoice could not be resolved from order.', [
+            'order_id' => $orderId,
+            'client_id' => $clientId,
+            'message' => $lastMessage,
+        ]);
+
+        return [
+            'ok' => false,
+            'message' => $lastMessage,
+        ];
+    }
+
     private function bridgeInvoiceFallback(int $invoiceId, int $clientId, int $orderId = 0): array
     {
         if (!$this->hasBridge()) {
@@ -348,6 +402,30 @@ final class WhmcsService
         return [
             'ok' => true,
             'fallback' => 'bridge_invoice',
+            'invoice' => $decoded['invoice'] ?? [],
+        ];
+    }
+
+    private function bridgeOrderInvoiceFallback(int $orderId, int $clientId): array
+    {
+        if (!$this->hasBridge()) {
+            return ['ok' => false, 'message' => 'The WHMCS bridge is not configured.'];
+        }
+
+        $decoded = $this->callApi([
+            'action' => 'PlaneticGetOrderInvoice',
+            'orderid' => $orderId,
+            'clientid' => $clientId,
+            'responsetype' => 'json',
+        ]);
+
+        if (($decoded['result'] ?? '') !== 'success') {
+            return ['ok' => false, 'message' => $decoded['message'] ?? 'Unable to load order invoice through the WHMCS bridge.'];
+        }
+
+        return [
+            'ok' => true,
+            'fallback' => 'bridge_order_invoice',
             'invoice' => $decoded['invoice'] ?? [],
         ];
     }
@@ -677,6 +755,8 @@ final class WhmcsService
     private function postApiRequest(string $apiUrl, string $payload, string $action): array
     {
         $verifySsl = $this->sslVerify();
+        $connectTimeout = $this->apiConnectTimeout($action);
+        $timeout = $this->apiTimeout($action);
         $curlFailure = [];
         if (function_exists('curl_init')) {
             $curl = curl_init($apiUrl);
@@ -684,8 +764,8 @@ final class WhmcsService
                 CURLOPT_POST => true,
                 CURLOPT_POSTFIELDS => $payload,
                 CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_CONNECTTIMEOUT => 10,
-                CURLOPT_TIMEOUT => 20,
+                CURLOPT_CONNECTTIMEOUT => $connectTimeout,
+                CURLOPT_TIMEOUT => $timeout,
                 CURLOPT_HTTPHEADER => ['Content-Type: application/x-www-form-urlencoded'],
                 CURLOPT_USERAGENT => 'PlaneticSolutionsWebsite/1.0',
                 CURLOPT_SSL_VERIFYPEER => $verifySsl,
@@ -730,7 +810,7 @@ final class WhmcsService
                 'method' => 'POST',
                 'header' => "Content-Type: application/x-www-form-urlencoded\r\nUser-Agent: PlaneticSolutionsWebsite/1.0\r\n",
                 'content' => $payload,
-                'timeout' => 20,
+                'timeout' => $timeout,
                 'ignore_errors' => true,
             ],
             'ssl' => [
@@ -758,9 +838,24 @@ final class WhmcsService
         ];
     }
 
+    private function apiConnectTimeout(string $action): int
+    {
+        return $this->isAccountReadAction($action) ? 4 : 10;
+    }
+
+    private function apiTimeout(string $action): int
+    {
+        return $this->isAccountReadAction($action) ? 8 : 20;
+    }
+
+    private function isAccountReadAction(string $action): bool
+    {
+        return in_array($action, ['GetClientsProducts', 'GetClientsDomains', 'GetInvoices'], true);
+    }
+
     private function canRetryApiAction(string $action): bool
     {
-        return in_array($action, ['DomainWhois', 'GetTLDPricing', 'GetProducts', 'GetClientsDetails', 'GetInvoice', 'GetInvoices', 'GetOrders', 'PlaneticGetInvoice', 'GetClientsProducts', 'GetClientsDomains'], true);
+        return in_array($action, ['DomainWhois', 'GetTLDPricing', 'GetProducts', 'GetClientsDetails', 'GetInvoice', 'GetInvoices', 'GetOrders', 'PlaneticGetInvoice', 'PlaneticGetOrderInvoice', 'GetClientsProducts', 'GetClientsDomains'], true);
     }
 
     private function normaliseApiList(mixed $items): array

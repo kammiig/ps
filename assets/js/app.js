@@ -45,6 +45,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     initPasswordToggles();
+    initSubmitGuards();
 
     const stripePayment = document.querySelector('[data-stripe-payment]');
     if (stripePayment) {
@@ -67,6 +68,29 @@ function initPasswordToggles() {
             button.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
             button.setAttribute('aria-pressed', String(show));
             input.focus();
+        });
+    });
+}
+
+function initSubmitGuards() {
+    document.querySelectorAll('form[method="post"]').forEach((form) => {
+        if (form.id === 'stripe-payment-form' || form.dataset.noSubmitGuard === 'true') {
+            return;
+        }
+
+        form.addEventListener('submit', () => {
+            const submit = form.querySelector('button[type="submit"], input[type="submit"]');
+            if (!(submit instanceof HTMLElement) || submit.hasAttribute('disabled')) {
+                return;
+            }
+
+            submit.dataset.originalText = submit.textContent || submit.getAttribute('value') || '';
+            window.setTimeout(() => {
+                submit.setAttribute('disabled', 'disabled');
+                if (submit instanceof HTMLButtonElement) {
+                    submit.textContent = 'Please wait...';
+                }
+            }, 0);
         });
     });
 }

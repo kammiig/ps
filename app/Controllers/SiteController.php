@@ -272,6 +272,10 @@ final class SiteController extends Controller
 
     public function checkout(array $errors = [], array $old = []): string
     {
+        if (!$errors && (string) ($_GET['login_error'] ?? '') === '1') {
+            $errors[] = 'Email or password is incorrect. Please try again or continue as a new customer.';
+        }
+
         $query = [
             'order_type' => $old['order_type'] ?? $_GET['type'] ?? 'bundle',
             'domain' => $old['domain'] ?? $_GET['domain'] ?? '',
@@ -364,20 +368,26 @@ final class SiteController extends Controller
             return $this->checkout(['Unable to create your order. Please try again or contact support.'], $data);
         }
 
-        if (empty($order['invoice_id'])) {
-            return $this->checkout(['Order created, but an invoice reference was not returned. Please contact support.'], $data);
+        $invoiceId = (int) ($order['invoice_id'] ?? 0);
+        $orderId = (int) ($order['order_id'] ?? 0);
+
+        if ($invoiceId > 0) {
+            $invoice = $this->whmcs->invoiceForClient($invoiceId, (int) $client['client_id'], $orderId);
+        } else {
+            $invoice = $this->whmcs->invoiceForOrder($orderId, (int) $client['client_id']);
+            $invoiceId = (int) ($invoice['invoice']['invoiceid'] ?? $invoice['invoice']['id'] ?? 0);
         }
 
-        $invoice = $this->whmcs->invoiceForClient(
-            (int) $order['invoice_id'],
-            (int) $client['client_id'],
-            (int) ($order['order_id'] ?? 0)
-        );
         if (!$invoice['ok']) {
             return $this->checkout(['Your order was created, but the secure payment amount could not be loaded. Please contact support.'], $data);
         }
 
         $invoiceData = $invoice['invoice'];
+        $invoiceId = (int) ($invoiceData['invoiceid'] ?? $invoiceData['id'] ?? $invoiceId);
+        if ($invoiceId <= 0) {
+            return $this->checkout(['Your order was created, but the secure payment amount could not be loaded. Please contact support.'], $data);
+        }
+
         $invoiceClientId = $this->invoiceClientId($invoiceData);
         if ($invoiceClientId > 0 && $invoiceClientId !== (int) $client['client_id']) {
             return $this->checkout(['The invoice could not be matched to your account. Please contact support.'], $data);
@@ -396,8 +406,8 @@ final class SiteController extends Controller
         $payment = (new PaymentRepository())->createOrUpdateOrder([
             'customer_user_id' => (int) $customer['user']['id'],
             'whmcs_client_id' => (int) $client['client_id'],
-            'whmcs_order_id' => (int) ($order['order_id'] ?? 0),
-            'whmcs_invoice_id' => (int) $order['invoice_id'],
+            'whmcs_order_id' => $orderId,
+            'whmcs_invoice_id' => $invoiceId,
             'invoice_amount' => $amount,
             'currency' => $this->invoiceCurrency($invoiceData),
         ]);
@@ -775,9 +785,9 @@ final class SiteController extends Controller
         return array_map(function (array $plan) use ($configuredProducts, $config): array {
             $slug = (string) $plan['slug'];
             $configured = $configuredProducts[$slug] ?? [];
-            $pid = (int) ($configured['pid'] ?? 0);
+            $pid = $this->pidFromUrl((string) ($plan['whmcs_url'] ?? ''));
             if ($pid <= 0) {
-                $pid = $this->pidFromUrl((string) ($plan['whmcs_url'] ?? ''));
+                $pid = (int) ($configured['pid'] ?? 0);
             }
 
             $plan['checkout_pid'] = $pid;

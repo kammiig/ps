@@ -1605,6 +1605,40 @@ textarea {
     margin: 0;
 }
 
+.checkout-login-card {
+    display: grid;
+    grid-template-columns: minmax(0, .9fr) minmax(420px, 1.1fr);
+    gap: 22px;
+    align-items: end;
+    margin-bottom: 24px;
+    padding: 24px;
+    background: var(--white);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+}
+
+.checkout-login-card h2 {
+    margin-bottom: 8px;
+    font-size: 1.55rem;
+}
+
+.checkout-login-card p {
+    margin-bottom: 0;
+}
+
+.checkout-login-card form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: end;
+}
+
+.checkout-login-card .btn {
+    min-height: 52px;
+    white-space: nowrap;
+}
+
 .checkout-layout {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 360px;
@@ -2952,9 +2986,18 @@ td {
     .split,
     .contact-grid,
     .checkout-layout,
+    .checkout-login-card,
     .payment-layout,
     .account-layout,
     .account-grid.two {
+        grid-template-columns: 1fr;
+    }
+
+    .checkout-login-card {
+        align-items: stretch;
+    }
+
+    .checkout-login-card form {
         grid-template-columns: 1fr;
     }
 
@@ -3080,6 +3123,8 @@ td {
     .pricing-grid,
     .domain-feature-grid,
     .checkout-choice-grid,
+    .checkout-login-card,
+    .checkout-login-card form,
     .checkout-form-grid,
     .account-stat-grid,
     .service-account-grid,
