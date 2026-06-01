@@ -392,7 +392,11 @@ final class SiteController extends Controller
         }
 
         if (!$invoice['ok']) {
-            return $this->checkout(['Your order was created, but the secure payment amount could not be loaded. Please contact support.'], $data);
+            $fallbackInvoice = $this->fallbackInvoiceForCheckout($invoiceId, $orderId, (int) $client['client_id'], $data, $invoice['message'] ?? '');
+            if (!$fallbackInvoice['ok']) {
+                return $this->checkout(['Your order was created, but the secure payment amount could not be loaded. Please contact support.'], $data);
+            }
+            $invoice = $fallbackInvoice;
         }
 
         $invoiceData = $invoice['invoice'];
@@ -408,7 +412,18 @@ final class SiteController extends Controller
 
         $amount = $this->invoiceAmountDue($invoiceData);
         if ($amount <= 0) {
-            return $this->checkout(['This invoice does not have a payable balance. Please contact support if this looks wrong.'], $data);
+            $expectedAmount = $this->expectedCheckoutAmount($data);
+            if ($expectedAmount <= 0) {
+                return $this->checkout(['This invoice does not have a payable balance. Please contact support if this looks wrong.'], $data);
+            }
+
+            $amount = $expectedAmount;
+            $this->writeCheckoutLog('Using configured checkout amount because WHMCS invoice balance was empty.', [
+                'invoice_id' => $invoiceId,
+                'order_id' => $orderId,
+                'order_type' => $data['order_type'],
+                'amount' => number_format($amount, 2, '.', ''),
+            ]);
         }
 
         $customer = $this->customerForCheckout($data, (int) $client['client_id']);
@@ -748,12 +763,41 @@ final class SiteController extends Controller
     private function invoiceAmountDue(array $invoice): float
     {
         foreach (['balance', 'amountpaidremaining', 'total', 'subtotal'] as $key) {
-            if (isset($invoice[$key]) && is_numeric($invoice[$key]) && (float) $invoice[$key] > 0) {
-                return round((float) $invoice[$key], 2);
+            if (!isset($invoice[$key])) {
+                continue;
+            }
+
+            $amount = $this->moneyToFloat($invoice[$key]);
+            if ($amount > 0) {
+                return round($amount, 2);
             }
         }
 
         return 0.0;
+    }
+
+    private function moneyToFloat(mixed $value): float
+    {
+        if (is_int($value) || is_float($value)) {
+            return round((float) $value, 2);
+        }
+
+        if (!is_string($value)) {
+            return 0.0;
+        }
+
+        $clean = preg_replace('/[^0-9.,-]+/', '', $value) ?: '';
+        if ($clean === '' || $clean === '-' || $clean === '.' || $clean === ',') {
+            return 0.0;
+        }
+
+        if (str_contains($clean, ',') && !str_contains($clean, '.')) {
+            $clean = str_replace(',', '.', $clean);
+        } else {
+            $clean = str_replace(',', '', $clean);
+        }
+
+        return is_numeric($clean) ? round((float) $clean, 2) : 0.0;
     }
 
     private function invoiceCurrency(array $invoice): string
@@ -770,6 +814,48 @@ final class SiteController extends Controller
     private function invoiceClientId(array $invoice): int
     {
         return (int) ($invoice['userid'] ?? $invoice['clientid'] ?? $invoice['user_id'] ?? 0);
+    }
+
+    private function fallbackInvoiceForCheckout(int $invoiceId, int $orderId, int $clientId, array $data, string $message = ''): array
+    {
+        $expectedAmount = $this->expectedCheckoutAmount($data);
+        if ($invoiceId <= 0 || $clientId <= 0 || $expectedAmount <= 0) {
+            $this->writeCheckoutLog('Unable to build checkout invoice fallback.', [
+                'invoice_id' => $invoiceId,
+                'order_id' => $orderId,
+                'client_id' => $clientId,
+                'order_type' => $data['order_type'] ?? '',
+                'expected_amount' => number_format($expectedAmount, 2, '.', ''),
+                'message' => $message,
+            ]);
+
+            return ['ok' => false, 'message' => $message ?: 'Unable to load invoice amount.'];
+        }
+
+        $this->writeCheckoutLog('Using configured checkout amount because WHMCS invoice lookup failed.', [
+            'invoice_id' => $invoiceId,
+            'order_id' => $orderId,
+            'client_id' => $clientId,
+            'order_type' => $data['order_type'] ?? '',
+            'amount' => number_format($expectedAmount, 2, '.', ''),
+            'message' => $message,
+        ]);
+
+        return [
+            'ok' => true,
+            'fallback' => 'configured_checkout_amount',
+            'invoice' => [
+                'invoiceid' => $invoiceId,
+                'id' => $invoiceId,
+                'userid' => $clientId,
+                'clientid' => $clientId,
+                'orderid' => $orderId,
+                'balance' => number_format($expectedAmount, 2, '.', ''),
+                'total' => number_format($expectedAmount, 2, '.', ''),
+                'status' => 'Unpaid',
+                'currency' => ['code' => 'GBP'],
+            ],
+        ];
     }
 
     private function rowsFromSetting(string $key, array $fallback): array
@@ -988,10 +1074,78 @@ final class SiteController extends Controller
         return 'Unable to prepare your customer account. Please check your details and try again.';
     }
 
+    private function expectedCheckoutAmount(array $data): float
+    {
+        $type = (string) ($data['order_type'] ?? '');
+        $amount = 0.0;
+
+        if ($type === 'website') {
+            $amount += $this->configuredWebsitePrice();
+            if ($this->websiteChargesDomain() && !empty($data['domain'])) {
+                $amount += $this->domainPriceAmount((string) $data['domain']);
+            }
+
+            return round($amount, 2);
+        }
+
+        if (in_array($type, ['domain', 'bundle'], true) && !empty($data['domain'])) {
+            $amount += $this->domainPriceAmount((string) $data['domain']);
+        }
+
+        if (in_array($type, ['hosting', 'bundle'], true)) {
+            $plan = $this->checkoutPlanBySlug((string) ($data['hosting_plan'] ?? ''));
+            if ($plan) {
+                $amount += $this->planPriceAmount($plan, (string) ($data['billing_cycle'] ?? 'monthly'));
+            }
+        }
+
+        return round($amount, 2);
+    }
+
+    private function configuredWebsitePrice(): float
+    {
+        $config = $this->whmcs->checkoutConfig()['website_package'] ?? [];
+        $package = $this->content->package();
+        return $this->moneyToFloat($config['price_override'] ?? $package['price'] ?? '199.00');
+    }
+
+    private function websiteChargesDomain(): bool
+    {
+        $config = $this->whmcs->checkoutConfig()['website_package'] ?? [];
+        if (array_key_exists('domain_price_override', $config)) {
+            return $this->moneyToFloat($config['domain_price_override']) > 0;
+        }
+
+        return false;
+    }
+
+    private function domainPriceAmount(string $domain): float
+    {
+        $parsed = $this->splitDomain($domain);
+        if (!$parsed) {
+            return 0.0;
+        }
+
+        return $this->moneyToFloat($this->configuredDomainPrice($parsed['tld']) ?? '0.00');
+    }
+
+    private function planPriceAmount(array $plan, string $billingCycle): float
+    {
+        $billingCycle = $this->normaliseBillingCycle($billingCycle) ?: 'monthly';
+        $monthly = $this->moneyToFloat($plan['monthly_price'] ?? '0.00');
+        $yearly = $this->moneyToFloat($plan['yearly_price'] ?? '0.00');
+
+        if ($billingCycle === 'annually') {
+            return $yearly > 0 ? $yearly : $monthly * 12;
+        }
+
+        return $monthly;
+    }
+
     private function publicCheckoutFailureMessage(\Throwable $exception): string
     {
         $message = strtolower($exception->getMessage());
-        if (str_contains($message, 'base table') || str_contains($message, 'customer_orders') || str_contains($message, 'customer_users') || str_contains($message, 'stripe')) {
+        if (str_contains($message, 'sqlstate') || str_contains($message, 'base table') || str_contains($message, 'customer_orders') || str_contains($message, 'customer_users') || str_contains($message, 'stripe')) {
             return 'Secure payment setup is not fully installed yet. Please contact support.';
         }
 
@@ -1026,11 +1180,6 @@ final class SiteController extends Controller
 
     private function logCheckoutFailure(\Throwable $exception, array $input): void
     {
-        $logDir = STORAGE_PATH . '/logs';
-        if (!is_dir($logDir)) {
-            @mkdir($logDir, 0755, true);
-        }
-
         $context = [
             'type' => get_class($exception),
             'message' => $exception->getMessage(),
@@ -1039,9 +1188,19 @@ final class SiteController extends Controller
             'request' => $this->safeCheckoutContext($input),
         ];
 
+        $this->writeCheckoutLog('Checkout submission failed.', $context);
+    }
+
+    private function writeCheckoutLog(string $message, array $context = []): void
+    {
+        $logDir = STORAGE_PATH . '/logs';
+        if (!is_dir($logDir)) {
+            @mkdir($logDir, 0755, true);
+        }
+
         @file_put_contents(
             $logDir . '/checkout.log',
-            '[' . date('c') . '] Checkout submission failed. ' . json_encode($context, JSON_UNESCAPED_SLASHES) . PHP_EOL,
+            '[' . date('c') . '] ' . $message . ' ' . json_encode($context, JSON_UNESCAPED_SLASHES) . PHP_EOL,
             FILE_APPEND
         );
     }

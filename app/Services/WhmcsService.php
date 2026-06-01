@@ -250,8 +250,8 @@ final class WhmcsService
 
         return [
             'ok' => true,
-            'order_id' => (int) ($decoded['orderid'] ?? 0),
-            'invoice_id' => (int) ($decoded['invoiceid'] ?? 0),
+            'order_id' => (int) ($decoded['orderid'] ?? $decoded['order_id'] ?? $decoded['orderId'] ?? 0),
+            'invoice_id' => (int) ($decoded['invoiceid'] ?? $decoded['invoice_id'] ?? $decoded['invoiceId'] ?? 0),
             'service_ids' => (string) ($decoded['serviceids'] ?? ''),
             'domain_ids' => (string) ($decoded['domainids'] ?? ''),
             'raw' => $decoded,
