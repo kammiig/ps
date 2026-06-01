@@ -45,6 +45,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     initPasswordToggles();
+    initModals();
     initSubmitGuards();
 
     const stripePayment = document.querySelector('[data-stripe-payment]');
@@ -68,6 +69,76 @@ function initPasswordToggles() {
             button.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
             button.setAttribute('aria-pressed', String(show));
             input.focus();
+        });
+    });
+}
+
+function initModals() {
+    let activeTrigger = null;
+
+    const openModal = (modal, trigger) => {
+        activeTrigger = trigger;
+        modal.hidden = false;
+        modal.setAttribute('aria-hidden', 'false');
+        document.body.classList.add('modal-open');
+
+        window.setTimeout(() => {
+            const focusTarget = modal.querySelector('form input, form select, form textarea, form button')
+                || modal.querySelector('button, a[href], input, select, textarea');
+            focusTarget?.focus();
+        }, 0);
+    };
+
+    const closeModal = (modal) => {
+        modal.hidden = true;
+        modal.setAttribute('aria-hidden', 'true');
+        document.body.classList.remove('modal-open');
+        activeTrigger?.focus();
+        activeTrigger = null;
+    };
+
+    document.querySelectorAll('[data-modal-open]').forEach((trigger) => {
+        trigger.addEventListener('click', () => {
+            const modalId = trigger.getAttribute('data-modal-open') || '';
+            const modal = modalId ? document.getElementById(modalId) : null;
+            if (modal) {
+                openModal(modal, trigger);
+            }
+        });
+    });
+
+    document.querySelectorAll('[data-modal]').forEach((modal) => {
+        modal.setAttribute('aria-hidden', modal.hidden ? 'true' : 'false');
+
+        modal.querySelectorAll('[data-modal-close]').forEach((control) => {
+            control.addEventListener('click', () => closeModal(modal));
+        });
+
+        modal.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape') {
+                closeModal(modal);
+                return;
+            }
+
+            if (event.key !== 'Tab') {
+                return;
+            }
+
+            const focusable = [...modal.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')]
+                .filter((element) => !element.hasAttribute('disabled') && element.offsetParent !== null);
+            if (!focusable.length) {
+                return;
+            }
+
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+            if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+            }
         });
     });
 }

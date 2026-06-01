@@ -53,27 +53,34 @@ $checkoutNext = $requestPath . ($requestQuery ? '?' . http_build_query($requestQ
         <?php endif; ?>
 
         <?php if (!$isCustomerLoggedIn): ?>
-            <div class="checkout-login-card">
-                <div>
+            <button class="checkout-login-link" type="button" data-modal-open="checkout-login-modal">
+                Existing customer? <span>Login now</span>
+            </button>
+
+            <div class="site-modal" id="checkout-login-modal" data-modal hidden>
+                <div class="site-modal-backdrop" data-modal-close></div>
+                <div class="site-modal-panel" role="dialog" aria-modal="true" aria-labelledby="checkout-login-title">
+                    <button class="site-modal-close" type="button" data-modal-close aria-label="Close login popup">Close</button>
                     <span class="section-kicker">Existing customer</span>
-                    <h2>Sign in for faster checkout</h2>
-                    <p>Use your Planetic Solutions account to load your saved details and keep this order under the same account.</p>
+                    <h2 id="checkout-login-title">Login to continue</h2>
+                    <p>Sign in to load your saved details and keep this order under your Planetic Solutions account.</p>
+
+                    <form action="<?= e(url('/account/login')) ?>" method="post">
+                        <input type="hidden" name="_csrf" value="<?= e($csrfToken) ?>">
+                        <input type="hidden" name="context" value="checkout">
+                        <input type="hidden" name="next" value="<?= e($checkoutNext) ?>">
+                        <label>
+                            <span>Email</span>
+                            <input name="email" type="email" autocomplete="email" required>
+                        </label>
+                        <label class="password-field">
+                            <span>Password</span>
+                            <input id="checkout-existing-password" name="password" type="password" autocomplete="current-password" required>
+                            <button class="password-toggle" type="button" data-password-toggle data-password-target="checkout-existing-password" aria-label="Show password" aria-pressed="false">Show</button>
+                        </label>
+                        <button class="btn btn-primary" type="submit">Login & Continue <?= icon('arrow') ?></button>
+                    </form>
                 </div>
-                <form action="<?= e(url('/account/login')) ?>" method="post">
-                    <input type="hidden" name="_csrf" value="<?= e($csrfToken) ?>">
-                    <input type="hidden" name="context" value="checkout">
-                    <input type="hidden" name="next" value="<?= e($checkoutNext) ?>">
-                    <label>
-                        <span>Email</span>
-                        <input name="email" type="email" autocomplete="email" required>
-                    </label>
-                    <label class="password-field">
-                        <span>Password</span>
-                        <input id="checkout-existing-password" name="password" type="password" autocomplete="current-password" required>
-                        <button class="password-toggle" type="button" data-password-toggle data-password-target="checkout-existing-password" aria-label="Show password" aria-pressed="false">Show</button>
-                    </label>
-                    <button class="btn btn-primary" type="submit">Login & Continue <?= icon('arrow') ?></button>
-                </form>
             </div>
         <?php endif; ?>
 
