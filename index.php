@@ -25,6 +25,7 @@ $router->post('/checkout', [SiteController::class, 'submitCheckout']);
 $router->get('/checkout/payment/{token}', [PaymentController::class, 'show']);
 $router->get('/checkout/success', [PaymentController::class, 'success']);
 $router->get('/checkout/payment-failed', [PaymentController::class, 'failed']);
+$router->get('/api/payment-status', [PaymentController::class, 'status']);
 $router->post('/stripe/webhook', [PaymentController::class, 'webhook']);
 $router->get('/about', [SiteController::class, 'about']);
 $router->get('/contact', [SiteController::class, 'contact']);

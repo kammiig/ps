@@ -113,6 +113,35 @@ final class PaymentController extends Controller
         ]));
     }
 
+    public function status(): string
+    {
+        header('Content-Type: application/json; charset=UTF-8');
+
+        $token = (string) ($_GET['order'] ?? '');
+        $order = $token !== '' ? $this->payments->findByToken($token) : null;
+        if (!$order || !$this->canView($order)) {
+            http_response_code(404);
+            return json_encode(['ok' => false, 'message' => 'Payment was not found.'], JSON_UNESCAPED_SLASHES);
+        }
+
+        $status = strtolower((string) ($order['payment_status'] ?? 'pending'));
+        $labels = [
+            'pending' => 'Pending Payment',
+            'processing' => 'Processing',
+            'paid' => 'Paid',
+            'failed' => 'Payment Failed',
+        ];
+
+        return json_encode([
+            'ok' => true,
+            'status' => $status,
+            'confirmed' => $status === 'paid',
+            'label' => $labels[$status] ?? ucwords($status),
+            'invoice_reference' => '#' . (int) $order['whmcs_invoice_id'],
+            'amount' => $this->money((float) $order['invoice_amount'], (string) $order['currency']),
+        ], JSON_UNESCAPED_SLASHES);
+    }
+
     public function payInvoice(string $invoiceId): string
     {
         if (!Csrf::verify($_POST['_csrf'] ?? null)) {
@@ -164,6 +193,9 @@ final class PaymentController extends Controller
         $signature = $_SERVER['HTTP_STRIPE_SIGNATURE'] ?? '';
         $verified = $this->stripe->verifyWebhook($payload, $signature);
         if (!$verified['ok']) {
+            $this->logPaymentIssue('Stripe webhook rejected.', [
+                'message' => $verified['message'] ?? 'Webhook signature verification failed.',
+            ]);
             http_response_code(400);
             return 'Invalid webhook signature.';
         }
@@ -175,6 +207,11 @@ final class PaymentController extends Controller
         $paymentIntentId = (string) ($intent['id'] ?? '');
 
         if ($eventId === '' || $paymentIntentId === '') {
+            $this->logPaymentIssue('Stripe webhook payload was missing required IDs.', [
+                'event_type' => $type,
+                'event_id_present' => $eventId !== '',
+                'payment_intent_present' => $paymentIntentId !== '',
+            ]);
             http_response_code(400);
             return 'Invalid webhook event.';
         }
@@ -210,6 +247,11 @@ final class PaymentController extends Controller
     private function handleSucceededWebhook(string $eventId, array $intent, ?array $order): string
     {
         if (!$order) {
+            $this->logPaymentIssue('Stripe webhook payment order was not found.', [
+                'event_id' => $eventId,
+                'payment_intent_id' => (string) ($intent['id'] ?? ''),
+                'local_order_id' => (int) ($intent['metadata']['local_order_id'] ?? 0),
+            ]);
             $this->payments->markWebhookEvent($eventId, 'failed');
             http_response_code(400);
             return 'Payment order was not found.';
@@ -224,6 +266,14 @@ final class PaymentController extends Controller
         $paidCurrency = strtoupper((string) ($intent['currency'] ?? ''));
         $expectedCurrency = strtoupper((string) $order['currency']);
         if (abs($paidAmount - (float) $order['invoice_amount']) > 0.01 || $paidCurrency !== $expectedCurrency) {
+            $this->logPaymentIssue('Stripe webhook amount mismatch.', [
+                'order_id' => (int) $order['id'],
+                'payment_intent_id' => (string) ($intent['id'] ?? ''),
+                'paid_amount' => $paidAmount,
+                'expected_amount' => (float) $order['invoice_amount'],
+                'paid_currency' => $paidCurrency,
+                'expected_currency' => $expectedCurrency,
+            ]);
             $this->payments->markPendingWithError((int) $order['id'], 'Stripe paid amount did not match the saved invoice amount.');
             $this->payments->markWebhookEvent($eventId, 'failed', (int) $order['id']);
             http_response_code(400);
@@ -232,6 +282,11 @@ final class PaymentController extends Controller
 
         $gateway = $this->whmcs->invoicePaymentGateway();
         if ($gateway === '') {
+            $this->logPaymentIssue('WHMCS payment gateway name is not configured for Stripe webhook.', [
+                'order_id' => (int) $order['id'],
+                'payment_intent_id' => (string) ($intent['id'] ?? ''),
+                'invoice_id' => (int) $order['whmcs_invoice_id'],
+            ]);
             $this->payments->markPendingWithError((int) $order['id'], 'WHMCS payment gateway name is not configured.');
             $this->payments->markWebhookEvent($eventId, 'failed', (int) $order['id']);
             http_response_code(500);
@@ -258,6 +313,12 @@ final class PaymentController extends Controller
         );
 
         if (!$recorded['ok']) {
+            $this->logPaymentIssue('Stripe payment could not be recorded against WHMCS invoice.', [
+                'order_id' => (int) $order['id'],
+                'payment_intent_id' => (string) ($intent['id'] ?? ''),
+                'invoice_id' => (int) $order['whmcs_invoice_id'],
+                'message' => $recorded['message'] ?? 'Unable to record invoice payment.',
+            ]);
             $this->payments->markPendingWithError((int) $order['id'], 'Payment reached Stripe but could not be recorded on the invoice yet.');
             $this->payments->markWebhookEvent($eventId, 'failed', (int) $order['id']);
             http_response_code(500);
@@ -422,5 +483,20 @@ final class PaymentController extends Controller
     {
         http_response_code(404);
         return (new SiteController())->notFound();
+    }
+
+    private function logPaymentIssue(string $message, array $context = []): void
+    {
+        $dir = STORAGE_PATH . '/logs';
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0755, true);
+        }
+
+        unset($context['secret_key'], $context['webhook_secret'], $context['client_secret'], $context['password']);
+        @file_put_contents(
+            $dir . '/payment.log',
+            '[' . date('c') . '] ' . $message . ' ' . json_encode($context, JSON_UNESCAPED_SLASHES) . PHP_EOL,
+            FILE_APPEND
+        );
     }
 }

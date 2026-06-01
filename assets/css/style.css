@@ -2171,6 +2171,13 @@ body.modal-open {
     font-weight: 900;
 }
 
+.payment-result-helper {
+    margin: 0;
+    color: var(--muted);
+    font-size: .98rem;
+    text-align: center;
+}
+
 .account-page {
     padding: 72px 0 88px;
     background:

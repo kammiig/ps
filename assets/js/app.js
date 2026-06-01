@@ -52,6 +52,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (stripePayment) {
         initStripePayment(stripePayment);
     }
+
+    const paymentStatusPage = document.querySelector('[data-payment-status-page]');
+    if (paymentStatusPage) {
+        initPaymentStatusPolling(paymentStatusPage);
+    }
 });
 
 function initPasswordToggles() {
@@ -709,4 +714,98 @@ async function initStripePayment(root) {
 
         window.location.href = returnUrl;
     });
+}
+
+function initPaymentStatusPolling(root) {
+    const statusUrl = root.dataset.paymentStatusUrl || '';
+    const initialStatus = (root.dataset.paymentInitialStatus || '').toLowerCase();
+    if (!statusUrl || initialStatus === 'paid') {
+        return;
+    }
+
+    const badge = root.querySelector('[data-payment-badge]');
+    const title = root.querySelector('[data-payment-title]');
+    const message = root.querySelector('[data-payment-message]');
+    const statusText = root.querySelector('[data-payment-status-text]');
+    const helper = root.querySelector('[data-payment-helper]');
+    let attempts = 0;
+    let finished = false;
+
+    const applyStatus = (payload) => {
+        const status = String(payload.status || '').toLowerCase();
+        const label = payload.label || status;
+        if (statusText) {
+            statusText.textContent = label;
+        }
+
+        if (status === 'paid') {
+            finished = true;
+            badge?.classList.remove('muted');
+            if (badge) {
+                badge.textContent = 'Paid';
+            }
+            if (title) {
+                title.textContent = 'Payment Confirmed';
+            }
+            if (message) {
+                message.textContent = 'Your payment has been confirmed and recorded on your invoice.';
+            }
+            if (helper) {
+                helper.hidden = true;
+            }
+            return;
+        }
+
+        if (status === 'failed') {
+            finished = true;
+            badge?.classList.add('muted');
+            if (badge) {
+                badge.textContent = 'Payment not completed';
+            }
+            if (title) {
+                title.textContent = 'Payment Unsuccessful';
+            }
+            if (message) {
+                message.textContent = 'Your payment could not be confirmed. Please retry payment or contact support.';
+            }
+            if (helper) {
+                helper.hidden = true;
+            }
+            return;
+        }
+
+        if (status === 'processing' && badge) {
+            badge.textContent = 'Processing';
+        }
+    };
+
+    const poll = async () => {
+        if (finished || attempts >= 40) {
+            return;
+        }
+
+        attempts += 1;
+        try {
+            const response = await fetch(statusUrl, {
+                headers: { Accept: 'application/json' },
+                credentials: 'same-origin',
+            });
+            if (!response.ok) {
+                return;
+            }
+
+            const payload = await response.json();
+            if (payload && payload.ok) {
+                applyStatus(payload);
+            }
+        } catch (error) {
+            return;
+        } finally {
+            if (!finished && attempts < 40) {
+                window.setTimeout(poll, 3000);
+            }
+        }
+    };
+
+    window.setTimeout(poll, 2500);
 }
