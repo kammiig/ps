@@ -322,6 +322,19 @@ final class SiteController extends Controller
 
     public function submitCheckout(): string
     {
+        try {
+            return $this->handleCheckoutSubmission();
+        } catch (\Throwable $exception) {
+            $this->logCheckoutFailure($exception, $_POST);
+
+            return $this->checkout([
+                $this->publicCheckoutFailureMessage($exception),
+            ], $_POST);
+        }
+    }
+
+    private function handleCheckoutSubmission(): string
+    {
         if (!Csrf::verify($_POST['_csrf'] ?? null)) {
             return $this->checkout(['Your security token expired. Please submit the form again.'], $_POST);
         }
@@ -365,7 +378,7 @@ final class SiteController extends Controller
         ], $orderPayload['payload']));
 
         if (!$order['ok']) {
-            return $this->checkout(['Unable to create your order. Please try again or contact support.'], $data);
+            return $this->checkout([$this->publicOrderError($order['message'] ?? '', $data)], $data);
         }
 
         $invoiceId = (int) ($order['invoice_id'] ?? 0);
@@ -973,6 +986,77 @@ final class SiteController extends Controller
         }
 
         return 'Unable to prepare your customer account. Please check your details and try again.';
+    }
+
+    private function publicCheckoutFailureMessage(\Throwable $exception): string
+    {
+        $message = strtolower($exception->getMessage());
+        if (str_contains($message, 'base table') || str_contains($message, 'customer_orders') || str_contains($message, 'customer_users') || str_contains($message, 'stripe')) {
+            return 'Secure payment setup is not fully installed yet. Please contact support.';
+        }
+
+        return 'We could not prepare your secure payment right now. Please check the selected package or contact support.';
+    }
+
+    private function publicOrderError(string $message, array $data): string
+    {
+        $lower = strtolower($message);
+        if (str_contains($lower, 'product') || str_contains($lower, 'pid') || str_contains($lower, 'package') || str_contains($lower, 'not found')) {
+            return 'This hosting package is not connected to an active billing product yet. Please choose another package or contact support.';
+        }
+
+        if (str_contains($lower, 'tld') || str_contains($lower, 'registration period') || str_contains($lower, 'domain registration')) {
+            return 'This domain extension is not configured for registration yet. Please choose another domain or contact support.';
+        }
+
+        if (str_contains($lower, 'domain')) {
+            return 'Domain registration could not be created right now. Please check the domain extension or contact support.';
+        }
+
+        if (($data['order_type'] ?? '') === 'domain') {
+            return 'Domain registration is not fully configured yet. Please contact support.';
+        }
+
+        if (in_array((string) ($data['order_type'] ?? ''), ['hosting', 'bundle'], true)) {
+            return 'The selected hosting package could not be ordered right now. Please choose another package or contact support.';
+        }
+
+        return 'Unable to create your order right now. Please contact support.';
+    }
+
+    private function logCheckoutFailure(\Throwable $exception, array $input): void
+    {
+        $logDir = STORAGE_PATH . '/logs';
+        if (!is_dir($logDir)) {
+            @mkdir($logDir, 0755, true);
+        }
+
+        $context = [
+            'type' => get_class($exception),
+            'message' => $exception->getMessage(),
+            'file' => basename($exception->getFile()),
+            'line' => $exception->getLine(),
+            'request' => $this->safeCheckoutContext($input),
+        ];
+
+        @file_put_contents(
+            $logDir . '/checkout.log',
+            '[' . date('c') . '] Checkout submission failed. ' . json_encode($context, JSON_UNESCAPED_SLASHES) . PHP_EOL,
+            FILE_APPEND
+        );
+    }
+
+    private function safeCheckoutContext(array $input): array
+    {
+        $allowed = ['order_type', 'domain', 'hosting_plan', 'billing_cycle', 'email', 'country'];
+        $context = [];
+        foreach ($allowed as $key) {
+            if (isset($input[$key])) {
+                $context[$key] = substr((string) $input[$key], 0, 120);
+            }
+        }
+
+        return $context;
     }
 
     private function buildWhmcsOrderPayload(array $data): array

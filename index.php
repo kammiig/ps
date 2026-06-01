@@ -46,6 +46,8 @@ $router->get('/account/dashboard', [AccountController::class, 'dashboard']);
 $router->get('/account/services', [AccountController::class, 'services']);
 $router->get('/account/billing', [AccountController::class, 'billing']);
 $router->post('/account/billing/{invoiceId}/pay', [PaymentController::class, 'payInvoice']);
+$router->get('/account/dns', [AccountController::class, 'dns']);
+$router->get('/account/dns/open', [AccountController::class, 'openDns']);
 $router->get('/account/profile', [AccountController::class, 'profile']);
 $router->post('/account/profile', [AccountController::class, 'profile']);
 $router->get('/admin/login', [AdminController::class, 'login']);

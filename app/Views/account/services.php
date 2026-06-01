@@ -32,13 +32,19 @@
             </section>
 
             <section class="account-card">
-                <h2>Domains</h2>
+                <div class="section-head compact">
+                    <div><span class="section-kicker">Domains</span><h2>Domain names</h2></div>
+                    <a class="text-link" href="<?= e(url('/account/dns')) ?>">DNS management <?= icon('arrow') ?></a>
+                </div>
                 <?php if ($domains): ?>
                     <div class="account-list">
                         <?php foreach ($domains as $domain): ?>
                             <div class="account-row">
                                 <div><strong><?= e($domain['domainname'] ?? $domain['domain'] ?? 'Domain') ?></strong><span>Renewal: <?= e($domain['nextduedate'] ?? 'Not available') ?></span></div>
-                                <div><span class="status-pill"><?= e($domain['status'] ?? 'Processing') ?></span></div>
+                                <div class="account-row-actions">
+                                    <span class="status-pill"><?= e($domain['status'] ?? 'Processing') ?></span>
+                                    <a class="btn btn-outline btn-small" href="<?= e(url('/account/dns')) ?>">Manage DNS</a>
+                                </div>
                             </div>
                         <?php endforeach; ?>
                     </div>

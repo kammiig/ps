@@ -205,7 +205,7 @@ final class AccountController extends Controller
         return $this->render('account/services', $this->baseData('account-services', [
             'account' => $account,
             'services' => $this->clientServices($account),
-            'domains' => $this->clientDomains($account),
+            'domains' => array_map([$this, 'accountDomain'], $this->clientDomains($account)),
         ]));
     }
 
@@ -218,6 +218,33 @@ final class AccountController extends Controller
             'invoices' => $this->clientInvoices($account),
             'payments' => $this->payments->recentForCustomer((int) $account['id'], 10),
         ]));
+    }
+
+    public function dns(): string
+    {
+        $account = $this->fullUser($this->requireCustomer());
+
+        return $this->render('account/dns', $this->baseData('account-dns', [
+            'account' => $account,
+            'domains' => array_map([$this, 'accountDomain'], $this->clientDomains($account)),
+            'dnsOpenUrl' => url('/account/dns/open'),
+        ]));
+    }
+
+    public function openDns(): string
+    {
+        $account = $this->fullUser($this->requireCustomer());
+        $clientId = (int) ($account['whmcs_client_id'] ?? 0);
+        if ($clientId <= 0) {
+            $this->redirect(url('/account/dns'));
+        }
+
+        $token = $this->whmcs->createSsoToken($clientId, 'clientarea:domains');
+        if (!empty($token['ok']) && (string) ($token['redirect_url'] ?? '') !== '') {
+            $this->redirect((string) $token['redirect_url']);
+        }
+
+        $this->redirect($this->whmcs->domainManagementUrl());
     }
 
     public function profile(array $errors = [], bool $saved = false): string
@@ -297,6 +324,13 @@ final class AccountController extends Controller
         $clientId = (int) $account['whmcs_client_id'];
         $result = $this->cachedWhmcsRead($clientId, 'invoices', fn (): array => $this->whmcs->invoicesForClient($clientId), $allowLiveLoad);
         return $result['ok'] ? $result['invoices'] : [];
+    }
+
+    private function accountDomain(array $domain): array
+    {
+        $domainId = (int) ($domain['id'] ?? $domain['domainid'] ?? 0);
+        $domain['management_url'] = $this->whmcs->domainManagementUrl($domainId);
+        return $domain;
     }
 
     private function cachedWhmcsRead(int $clientId, string $key, callable $loader, bool $allowLiveLoad = true): array

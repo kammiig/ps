@@ -632,6 +632,15 @@ final class WhmcsService
         return $this->clientAreaUrl() . 'viewinvoice.php?id=' . $invoiceId;
     }
 
+    public function domainManagementUrl(int $domainId = 0): string
+    {
+        if ($domainId > 0) {
+            return $this->clientAreaUrl() . 'clientarea.php?action=domaindetails&id=' . $domainId;
+        }
+
+        return $this->clientAreaUrl() . 'clientarea.php?action=domains';
+    }
+
     public function paymentMethod(): string
     {
         return (string) ($this->settings['whmcs_payment_method'] ?? $this->config['payment_method'] ?? env('WHMCS_PAYMENT_METHOD', 'stripe'));

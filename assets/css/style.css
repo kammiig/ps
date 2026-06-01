@@ -2335,6 +2335,35 @@ body.modal-open {
     color: var(--muted);
 }
 
+.account-row-actions {
+    display: inline-flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 10px;
+    align-items: center;
+}
+
+.dns-intro-card {
+    display: flex;
+    justify-content: space-between;
+    gap: 22px;
+    align-items: center;
+}
+
+.dns-intro-card p,
+.dns-support-card p {
+    margin-bottom: 0;
+}
+
+.dns-support-card {
+    display: grid;
+    gap: 12px;
+}
+
+.dns-support-card .btn {
+    width: fit-content;
+}
+
 .status-pill {
     display: inline-flex;
     align-items: center;
@@ -3259,6 +3288,16 @@ td {
     .checkout-panel,
     .checkout-summary-card {
         padding: 22px;
+    }
+
+    .account-row,
+    .dns-intro-card {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .account-row-actions {
+        justify-content: flex-start;
     }
 
     .site-modal {
