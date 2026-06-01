@@ -1925,8 +1925,9 @@ body.modal-open {
 
 .password-toggle {
     position: absolute;
-    top: calc(1.45em + 31px);
+    top: auto;
     right: 10px;
+    bottom: 12px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1940,7 +1941,7 @@ body.modal-open {
     font-size: 0;
     font-weight: 900;
     line-height: 1;
-    transform: translateY(-50%);
+    transform: none;
     cursor: pointer;
 }
 

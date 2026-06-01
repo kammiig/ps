@@ -42,13 +42,27 @@ final class AccountController extends Controller
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!Csrf::verify($_POST['_csrf'] ?? null)) {
-                return $this->login(['Your security token expired. Please try again.'], $_POST);
+                return $this->loginForm(['Your security token expired. Please try again.'], $_POST);
             }
 
             $email = strtolower(trim((string) ($_POST['email'] ?? '')));
             $identifier = ($_SERVER['REMOTE_ADDR'] ?? 'local') . ':' . $email;
             if (RateLimiter::tooManyAttempts('customer_login', $identifier, 6, 900)) {
-                return $this->login(['Too many login attempts. Please wait a few minutes and try again.'], $_POST);
+                return $this->loginForm(['Too many login attempts. Please wait a few minutes and try again.'], $_POST);
+            }
+
+            $existingCustomer = filter_var($email, FILTER_VALIDATE_EMAIL) ? $this->customers->findByEmail($email) : null;
+            if ($existingCustomer) {
+                $hashSafety = CustomerAuth::passwordHashSafety((string) ($existingCustomer['password_hash'] ?? ''));
+                if (!$hashSafety['safe']) {
+                    $this->logAccountIssue('Customer login blocked because password hash needs resetting.', [
+                        'email' => $email,
+                        'reason' => $hashSafety['reason'],
+                    ]);
+                    RateLimiter::hit('customer_login', $identifier, 900);
+
+                    return $this->loginForm(['Please reset your password before logging in.'], $_POST);
+                }
             }
 
             try {
@@ -64,7 +78,7 @@ final class AccountController extends Controller
                     'message' => $exception->getMessage(),
                 ]);
 
-                return $this->login(['Login is temporarily unavailable. Please try again shortly.'], $_POST);
+                return $this->loginForm(['Login is temporarily unavailable. Please try again shortly.'], $_POST);
             }
 
             RateLimiter::hit('customer_login', $identifier, 900);
@@ -73,36 +87,32 @@ final class AccountController extends Controller
                 $this->redirect($this->withQueryFlag($next, 'login_error', '1'));
             }
 
-            return $this->login(['Email or password is incorrect.'], $_POST);
+            return $this->loginForm(['Email or password is incorrect.'], $_POST);
         }
 
-        return $this->render('account/login', $this->baseData('account-login', [
-            'errors' => $errors,
-            'old' => $old,
-            'next' => $this->safeNext((string) ($_GET['next'] ?? $old['next'] ?? '')),
-        ]));
+        return $this->loginForm($errors, $old);
     }
 
     public function register(array $errors = [], array $old = []): string
     {
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!Csrf::verify($_POST['_csrf'] ?? null)) {
-                return $this->register(['Your security token expired. Please try again.'], $_POST);
+                return $this->registerForm(['Your security token expired. Please try again.'], $_POST);
             }
 
             [$data, $validation] = $this->validateRegistration($_POST);
             if ($validation) {
-                return $this->register($validation, $data);
+                return $this->registerForm($validation, $data);
             }
 
             $identifier = ($_SERVER['REMOTE_ADDR'] ?? 'local') . ':' . $data['email'];
             if (RateLimiter::tooManyAttempts('customer_register', $identifier, 5, 900)) {
-                return $this->register(['Too many registration attempts. Please wait a few minutes and try again.'], $data);
+                return $this->registerForm(['Too many registration attempts. Please wait a few minutes and try again.'], $data);
             }
             RateLimiter::hit('customer_register', $identifier, 900);
 
             if ($this->customers->findByEmail($data['email'])) {
-                return $this->register(['An account already exists for this email. Please log in instead.'], $data);
+                return $this->registerForm(['An account already exists for this email. Please log in instead.'], $data);
             }
 
             $user = $this->customers->create($data);
@@ -111,11 +121,7 @@ final class AccountController extends Controller
             $this->redirect(url('/account/dashboard'));
         }
 
-        return $this->render('account/register', $this->baseData('account-register', [
-            'errors' => $errors,
-            'old' => $old,
-            'countries' => $this->countries(),
-        ]));
+        return $this->registerForm($errors, $old);
     }
 
     public function logout(): string
@@ -128,13 +134,13 @@ final class AccountController extends Controller
     {
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!Csrf::verify($_POST['_csrf'] ?? null)) {
-                return $this->passwordReset(['Your security token expired. Please try again.']);
+                return $this->passwordResetRequestForm(['Your security token expired. Please try again.']);
             }
 
             $email = strtolower(trim((string) ($_POST['email'] ?? '')));
             $identifier = ($_SERVER['REMOTE_ADDR'] ?? 'local') . ':' . $email;
             if (RateLimiter::tooManyAttempts('password_reset', $identifier, 5, 900)) {
-                return $this->passwordReset(['Too many reset requests. Please wait a few minutes and try again.']);
+                return $this->passwordResetRequestForm(['Too many reset requests. Please wait a few minutes and try again.']);
             }
             RateLimiter::hit('password_reset', $identifier, 900);
 
@@ -145,47 +151,81 @@ final class AccountController extends Controller
                 Mailer::customerPasswordReset($this->settings, $user, rtrim((string) ($this->settings['app_url'] ?? env('APP_URL', '')), '/') . url('/account/password-reset/' . $token));
             }
 
-            return $this->passwordReset([], true);
+            return $this->passwordResetRequestForm([], true);
         }
 
-        return $this->render('account/password-reset', $this->baseData('account-password-reset', [
-            'errors' => $errors,
-            'sent' => $sent,
-        ]));
+        return $this->passwordResetRequestForm($errors, $sent);
     }
 
     public function passwordResetForm(string $token, array $errors = []): string
     {
         $reset = $this->customers->resetByToken($token);
         if (!$reset) {
-            return $this->render('account/password-reset-form', $this->baseData('account-password-reset', [
-                'errors' => ['This password reset link is invalid or expired.'],
-                'token' => $token,
-                'valid' => false,
-            ]));
+            return $this->passwordResetTokenView($token, ['This password reset link is invalid or expired.'], false);
         }
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!Csrf::verify($_POST['_csrf'] ?? null)) {
-                return $this->passwordResetForm($token, ['Your security token expired. Please try again.']);
+                return $this->passwordResetTokenView($token, ['Your security token expired. Please try again.'], true);
             }
 
             $password = (string) ($_POST['password'] ?? '');
             if (strlen($password) < 8) {
-                return $this->passwordResetForm($token, ['Password must be at least 8 characters.']);
+                return $this->passwordResetTokenView($token, ['Password must be at least 8 characters.'], true);
             }
             if ($password !== (string) ($_POST['password_confirmation'] ?? '')) {
-                return $this->passwordResetForm($token, ['Password confirmation does not match.']);
+                return $this->passwordResetTokenView($token, ['Password confirmation does not match.'], true);
             }
 
             $this->customers->updatePasswordFromReset((int) $reset['id'], (int) $reset['customer_user_id'], $password);
             $this->redirect(url('/account/login'));
         }
 
+        return $this->passwordResetTokenView($token, $errors, true);
+    }
+
+    private function loginForm(array $errors = [], array $old = []): string
+    {
+        return $this->render('account/login', $this->baseData('account-login', [
+            'errors' => $errors,
+            'old' => $old,
+            'next' => $this->safeNext((string) ($_GET['next'] ?? $old['next'] ?? '')),
+        ]));
+    }
+
+    private function registerForm(array $errors = [], array $old = []): string
+    {
+        return $this->render('account/register', $this->baseData('account-register', [
+            'errors' => $errors,
+            'old' => $old,
+            'countries' => $this->countries(),
+        ]));
+    }
+
+    private function passwordResetRequestForm(array $errors = [], bool $sent = false): string
+    {
+        return $this->render('account/password-reset', $this->baseData('account-password-reset', [
+            'errors' => $errors,
+            'sent' => $sent,
+        ]));
+    }
+
+    private function passwordResetTokenView(string $token, array $errors = [], bool $valid = true): string
+    {
         return $this->render('account/password-reset-form', $this->baseData('account-password-reset', [
             'errors' => $errors,
             'token' => $token,
-            'valid' => true,
+            'valid' => $valid,
+        ]));
+    }
+
+    private function profileView(array $account, array $errors = [], bool $saved = false): string
+    {
+        return $this->render('account/profile', $this->baseData('account-profile', [
+            'account' => $account,
+            'countries' => $this->countries(),
+            'errors' => $errors,
+            'saved' => $saved,
         ]));
     }
 
@@ -263,17 +303,12 @@ final class AccountController extends Controller
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!Csrf::verify($_POST['_csrf'] ?? null)) {
-                return $this->profile(['Your security token expired. Please try again.']);
+                return $this->profileView($account, ['Your security token expired. Please try again.'], false);
             }
 
             [$data, $validation] = $this->validateProfile($_POST, (int) $account['id']);
             if ($validation) {
-                return $this->render('account/profile', $this->baseData('account-profile', [
-                    'account' => array_merge($account, $data),
-                    'countries' => $this->countries(),
-                    'errors' => $validation,
-                    'saved' => false,
-                ]));
+                return $this->profileView(array_merge($account, $data), $validation, false);
             }
 
             $updated = $this->customers->updateProfile((int) $account['id'], $data);
@@ -292,15 +327,10 @@ final class AccountController extends Controller
                 ]);
             }
 
-            return $this->profile([], true);
+            return $this->profileView($updated ?: $account, [], true);
         }
 
-        return $this->render('account/profile', $this->baseData('account-profile', [
-            'account' => $account,
-            'countries' => $this->countries(),
-            'errors' => $errors,
-            'saved' => $saved,
-        ]));
+        return $this->profileView($account, $errors, $saved);
     }
 
     private function clientServices(array $account, bool $allowLiveLoad = true): array

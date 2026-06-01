@@ -39,7 +39,7 @@ final class CustomerAuth
     public function attempt(string $email, string $password): bool
     {
         $user = $this->customers->findByEmail($email);
-        if (!$user || !password_verify($password, $user['password_hash'])) {
+        if (!$user || !self::passwordMatches($password, (string) $user['password_hash'])) {
             return false;
         }
 
@@ -74,5 +74,43 @@ final class CustomerAuth
             'name' => trim(($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? '')),
             'email' => $user['email'] ?? '',
         ];
+    }
+
+    public static function passwordMatches(string $password, string $hash): bool
+    {
+        $safety = self::passwordHashSafety($hash);
+        if (!$safety['safe']) {
+            return false;
+        }
+
+        return password_verify($password, $hash);
+    }
+
+    public static function passwordHashSafety(string $hash): array
+    {
+        $info = password_get_info($hash);
+        $algoName = strtolower((string) ($info['algoName'] ?? ''));
+        $options = is_array($info['options'] ?? null) ? $info['options'] : [];
+
+        if (($info['algo'] ?? 0) === 0 || $algoName === 'unknown') {
+            return ['safe' => false, 'reason' => 'unsupported_password_hash'];
+        }
+
+        if ($algoName === 'bcrypt') {
+            $cost = (int) ($options['cost'] ?? 0);
+            if ($cost > 14) {
+                return ['safe' => false, 'reason' => 'bcrypt_cost_too_high'];
+            }
+        }
+
+        if (str_starts_with($algoName, 'argon2')) {
+            $memoryCost = (int) ($options['memory_cost'] ?? 0);
+            $timeCost = (int) ($options['time_cost'] ?? 0);
+            if ($memoryCost > 131072 || $timeCost > 6) {
+                return ['safe' => false, 'reason' => 'argon2_cost_too_high'];
+            }
+        }
+
+        return ['safe' => true, 'reason' => 'ok'];
     }
 }

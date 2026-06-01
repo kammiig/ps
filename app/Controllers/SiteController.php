@@ -685,7 +685,7 @@ final class SiteController extends Controller
 
         $existing = $customers->findByEmail($data['email']);
         if ($existing) {
-            if (!password_verify($data['password'], $existing['password_hash'])) {
+            if (!CustomerAuth::passwordMatches((string) $data['password'], (string) ($existing['password_hash'] ?? ''))) {
                 return ['ok' => false, 'message' => 'An account already exists for this email. Please log in before continuing.'];
             }
             if (!empty($existing['whmcs_client_id']) && (int) $existing['whmcs_client_id'] !== $whmcsClientId) {
@@ -723,7 +723,7 @@ final class SiteController extends Controller
         }
 
         $existing = (new CustomerRepository())->findByEmail($data['email']);
-        if ($existing && !password_verify($data['password'], $existing['password_hash'])) {
+        if ($existing && !CustomerAuth::passwordMatches((string) $data['password'], (string) ($existing['password_hash'] ?? ''))) {
             return ['ok' => false, 'message' => 'An account already exists for this email. Please log in before continuing.'];
         }
 

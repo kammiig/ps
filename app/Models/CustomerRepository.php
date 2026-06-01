@@ -89,14 +89,10 @@ final class CustomerRepository
     {
         $stmt = $this->db->prepare(
             'UPDATE customer_users
-             SET whmcs_client_id = :whmcs_client_id, updated_at = NOW()
-             WHERE id = :id AND (whmcs_client_id IS NULL OR whmcs_client_id = :existing_whmcs_client_id)'
+             SET whmcs_client_id = ?, updated_at = NOW()
+             WHERE id = ? AND (whmcs_client_id IS NULL OR whmcs_client_id = ?)'
         );
-        $stmt->execute([
-            'id' => $id,
-            'whmcs_client_id' => $whmcsClientId,
-            'existing_whmcs_client_id' => $whmcsClientId,
-        ]);
+        $stmt->execute([$whmcsClientId, $id, $whmcsClientId]);
 
         return $this->find($id);
     }
