@@ -51,10 +51,20 @@ final class AccountController extends Controller
                 return $this->login(['Too many login attempts. Please wait a few minutes and try again.'], $_POST);
             }
 
-            if ($this->auth->attempt($email, (string) ($_POST['password'] ?? ''))) {
-                RateLimiter::clear('customer_login', $identifier);
-                $next = $this->safeNext((string) ($_POST['next'] ?? $_GET['next'] ?? ''));
-                $this->redirect($next ?: url('/account/dashboard'));
+            try {
+                if ($this->auth->attempt($email, (string) ($_POST['password'] ?? ''))) {
+                    RateLimiter::clear('customer_login', $identifier);
+                    $next = $this->safeNext((string) ($_POST['next'] ?? $_GET['next'] ?? ''));
+                    $this->redirect($next ?: url('/account/dashboard'));
+                }
+            } catch (\Throwable $exception) {
+                $this->logAccountIssue('Customer login failed.', [
+                    'email' => $email,
+                    'type' => get_class($exception),
+                    'message' => $exception->getMessage(),
+                ]);
+
+                return $this->login(['Login is temporarily unavailable. Please try again shortly.'], $_POST);
             }
 
             RateLimiter::hit('customer_login', $identifier, 900);
@@ -185,7 +195,7 @@ final class AccountController extends Controller
         $account = $this->fullUser($user);
         $services = $this->clientServices($account, false);
         $invoices = $this->clientInvoices($account, false);
-        $recentPayments = $this->payments->recentForCustomer((int) $account['id'], 3);
+        $recentPayments = $this->safeRecentPayments((int) $account['id'], 3);
 
         return $this->render('account/dashboard', $this->baseData('account-dashboard', [
             'account' => $account,
@@ -216,7 +226,7 @@ final class AccountController extends Controller
         return $this->render('account/billing', $this->baseData('account-billing', [
             'account' => $account,
             'invoices' => $this->clientInvoices($account),
-            'payments' => $this->payments->recentForCustomer((int) $account['id'], 10),
+            'payments' => $this->safeRecentPayments((int) $account['id'], 10),
         ]));
     }
 
@@ -350,7 +360,18 @@ final class AccountController extends Controller
             return ['ok' => false, $key => []];
         }
 
-        $payload = $loader();
+        try {
+            $payload = $loader();
+        } catch (\Throwable $exception) {
+            $this->logAccountIssue('WHMCS account read failed.', [
+                'client_id' => $clientId,
+                'key' => $key,
+                'type' => get_class($exception),
+                'message' => $exception->getMessage(),
+            ]);
+            $payload = ['ok' => false, $key => []];
+        }
+
         $ttl = !empty($payload['ok']) ? 120 : 45;
         @file_put_contents($file, json_encode([
             'expires_at' => time() + $ttl,
@@ -358,6 +379,36 @@ final class AccountController extends Controller
         ], JSON_UNESCAPED_SLASHES));
 
         return $payload;
+    }
+
+    private function safeRecentPayments(int $customerId, int $limit): array
+    {
+        try {
+            return $this->payments->recentForCustomer($customerId, $limit);
+        } catch (\Throwable $exception) {
+            $this->logAccountIssue('Customer payment history could not be loaded.', [
+                'customer_id' => $customerId,
+                'type' => get_class($exception),
+                'message' => $exception->getMessage(),
+            ]);
+
+            return [];
+        }
+    }
+
+    private function logAccountIssue(string $message, array $context = []): void
+    {
+        $dir = STORAGE_PATH . '/logs';
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0755, true);
+        }
+
+        unset($context['password'], $context['password_hash']);
+        @file_put_contents(
+            $dir . '/account.log',
+            '[' . date('c') . '] ' . $message . ' ' . json_encode($context, JSON_UNESCAPED_SLASHES) . PHP_EOL,
+            FILE_APPEND
+        );
     }
 
     private function friendlyService(array $service): array

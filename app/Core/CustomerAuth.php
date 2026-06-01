@@ -51,7 +51,11 @@ final class CustomerAuth
     {
         session_regenerate_id(true);
         $_SESSION['customer_user'] = $this->sessionPayload($user);
-        $this->customers->touchLogin((int) $user['id']);
+        try {
+            $this->customers->touchLogin((int) $user['id']);
+        } catch (\Throwable) {
+            // Login should not fail if the non-critical last-login timestamp cannot be written.
+        }
     }
 
     public function logout(): void
