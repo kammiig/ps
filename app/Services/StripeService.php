@@ -55,7 +55,7 @@ final class StripeService
             }
         }
 
-        $created = $this->api('POST', '/v1/payment_intents', [
+        $params = [
             'amount' => $amount,
             'currency' => $currency,
             'automatic_payment_methods' => ['enabled' => 'true'],
@@ -65,7 +65,10 @@ final class StripeService
                 'whmcs_order_id' => (string) ($order['whmcs_order_id'] ?? ''),
                 'whmcs_invoice_id' => (string) $order['whmcs_invoice_id'],
             ],
-        ], 'planetic-order-' . (int) $order['id'] . '-' . $amount . '-' . $currency);
+        ];
+        $idempotencyKey = 'planetic-order-' . (int) $order['id'] . '-' . substr(sha1(json_encode($params, JSON_UNESCAPED_SLASHES) ?: ''), 0, 20);
+
+        $created = $this->api('POST', '/v1/payment_intents', $params, $idempotencyKey);
 
         if (!($created['ok'] ?? false)) {
             return ['ok' => false, 'message' => $created['message'] ?? 'Stripe could not create the secure payment form.'];

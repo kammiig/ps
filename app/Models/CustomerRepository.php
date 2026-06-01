@@ -90,11 +90,15 @@ final class CustomerRepository
         $stmt = $this->db->prepare(
             'UPDATE customer_users
              SET whmcs_client_id = :whmcs_client_id, updated_at = NOW()
-             WHERE id = :id AND (whmcs_client_id IS NULL OR whmcs_client_id = :whmcs_client_id)'
+             WHERE id = :id AND (whmcs_client_id IS NULL OR whmcs_client_id = :existing_whmcs_client_id)'
         );
-        $stmt->execute(['id' => $id, 'whmcs_client_id' => $whmcsClientId]);
+        $stmt->execute([
+            'id' => $id,
+            'whmcs_client_id' => $whmcsClientId,
+            'existing_whmcs_client_id' => $whmcsClientId,
+        ]);
 
-        return $stmt->rowCount() > 0 ? $this->find($id) : null;
+        return $this->find($id);
     }
 
     public function touchLogin(int $id): void
