@@ -352,12 +352,12 @@ final class SiteController extends Controller
         if ($this->orderRegistersDomain($data['order_type'])) {
             $availability = $this->whmcs->checkDomain($data['domain']);
             if (!$availability['ok']) {
-                return $this->checkout([
-                    $this->publicWhmcsErrorMessage($availability['message'] ?? ''),
-                ], $data);
-            }
-
-            if (!$availability['available']) {
+                $this->writeCheckoutLog('Domain availability precheck could not be completed; continuing to WHMCS order validation.', [
+                    'order_type' => $data['order_type'],
+                    'domain' => $data['domain'],
+                    'message' => $availability['message'] ?? '',
+                ]);
+            } elseif (!$availability['available']) {
                 return $this->checkout(['That domain is no longer available. Please search another domain.'], $data);
             }
         }
@@ -378,6 +378,24 @@ final class SiteController extends Controller
         ], $orderPayload['payload']));
 
         if (!$order['ok']) {
+            $retry = $this->retryAddOrderWithMatchedProduct($data, (int) $client['client_id'], $orderPayload, (string) ($order['message'] ?? ''));
+            if ($retry['ok']) {
+                $order = $retry['order'];
+                $orderPayload = $retry['order_payload'];
+            }
+        }
+
+        if (!$order['ok']) {
+            $this->writeCheckoutLog('WHMCS AddOrder failed.', [
+                'order_type' => $data['order_type'],
+                'domain' => $data['domain'],
+                'hosting_plan' => $data['hosting_plan'],
+                'billing_cycle' => $data['billing_cycle'],
+                'pid' => $orderPayload['debug']['pid'] ?? 0,
+                'payload_keys' => array_keys((array) ($orderPayload['payload'] ?? [])),
+                'message' => $order['message'] ?? '',
+                'response_keys' => array_keys((array) ($order['raw'] ?? [])),
+            ]);
             return $this->checkout([$this->publicOrderError($order['message'] ?? '', $data)], $data);
         }
 
@@ -1162,9 +1180,131 @@ final class SiteController extends Controller
         return 'We could not prepare your secure payment right now. Please check the selected package or contact support.';
     }
 
+    private function retryAddOrderWithMatchedProduct(array $data, int $clientId, array $orderPayload, string $originalMessage): array
+    {
+        if (!in_array((string) ($data['order_type'] ?? ''), ['hosting', 'bundle'], true)) {
+            return ['ok' => false];
+        }
+
+        if (!$this->looksLikeProductMappingError($originalMessage)) {
+            return ['ok' => false];
+        }
+
+        $plan = $this->checkoutPlanBySlug((string) ($data['hosting_plan'] ?? ''));
+        if (!$plan) {
+            return ['ok' => false];
+        }
+
+        $matchedPid = $this->matchedWhmcsProductPid((string) ($plan['title'] ?? ''));
+        $currentPid = (int) ($orderPayload['debug']['pid'] ?? 0);
+        if ($matchedPid <= 0 || $matchedPid === $currentPid) {
+            return ['ok' => false];
+        }
+
+        $retryPayload = (array) ($orderPayload['payload'] ?? []);
+        $retryPayload['pid'] = [$matchedPid];
+        $retryOrderPayload = $orderPayload;
+        $retryOrderPayload['payload'] = $retryPayload;
+        $retryOrderPayload['debug']['pid'] = $matchedPid;
+        $retryOrderPayload['debug']['pid_source'] = 'whmcs_product_name_match';
+
+        $this->writeCheckoutLog('Retrying WHMCS AddOrder with product matched by WHMCS product name.', [
+            'order_type' => $data['order_type'],
+            'hosting_plan' => $data['hosting_plan'],
+            'plan_title' => $plan['title'] ?? '',
+            'original_pid' => $currentPid,
+            'matched_pid' => $matchedPid,
+            'original_message' => $originalMessage,
+        ]);
+
+        $retryOrder = $this->whmcs->addOrder(array_merge([
+            'clientid' => $clientId,
+        ], $retryPayload));
+
+        if (!$retryOrder['ok']) {
+            $this->writeCheckoutLog('WHMCS AddOrder retry with matched product failed.', [
+                'order_type' => $data['order_type'],
+                'hosting_plan' => $data['hosting_plan'],
+                'matched_pid' => $matchedPid,
+                'message' => $retryOrder['message'] ?? '',
+                'response_keys' => array_keys((array) ($retryOrder['raw'] ?? [])),
+            ]);
+
+            return ['ok' => false];
+        }
+
+        return [
+            'ok' => true,
+            'order' => $retryOrder,
+            'order_payload' => $retryOrderPayload,
+        ];
+    }
+
+    private function looksLikeProductMappingError(string $message): bool
+    {
+        $message = strtolower($message);
+        return str_contains($message, 'product')
+            || str_contains($message, 'pid')
+            || str_contains($message, 'package')
+            || str_contains($message, 'not found');
+    }
+
+    private function matchedWhmcsProductPid(string $title): int
+    {
+        $needle = $this->normaliseProductTitle($title);
+        if ($needle === '') {
+            return 0;
+        }
+
+        $products = $this->whmcs->products();
+        if (!$products['ok']) {
+            $this->writeCheckoutLog('Unable to fetch WHMCS products for checkout PID fallback.', [
+                'plan_title' => $title,
+                'message' => $products['message'] ?? '',
+            ]);
+
+            return 0;
+        }
+
+        foreach ($this->normaliseApiRows($products['products'] ?? []) as $product) {
+            $candidate = $this->normaliseProductTitle((string) ($product['name'] ?? $product['productname'] ?? $product['title'] ?? ''));
+            if ($candidate !== $needle) {
+                continue;
+            }
+
+            return (int) ($product['pid'] ?? $product['id'] ?? 0);
+        }
+
+        return 0;
+    }
+
+    private function normaliseProductTitle(string $title): string
+    {
+        $title = strtolower(trim($title));
+        $title = preg_replace('/[^a-z0-9]+/', ' ', $title) ?: '';
+        return trim(preg_replace('/\s+/', ' ', $title) ?: '');
+    }
+
+    private function normaliseApiRows(mixed $rows): array
+    {
+        if (!is_array($rows) || $rows === []) {
+            return [];
+        }
+
+        if (array_keys($rows) === range(0, count($rows) - 1)) {
+            return $rows;
+        }
+
+        return [$rows];
+    }
+
     private function publicOrderError(string $message, array $data): string
     {
         $lower = strtolower($message);
+        if (str_contains($lower, 'payment method') || str_contains($lower, 'paymentmethod') || str_contains($lower, 'gateway')) {
+            return 'The billing payment method is not configured correctly yet. Please contact support.';
+        }
+
         if (str_contains($lower, 'product') || str_contains($lower, 'pid') || str_contains($lower, 'package') || str_contains($lower, 'not found')) {
             return 'This hosting package is not connected to an active billing product yet. Please choose another package or contact support.';
         }
@@ -1239,7 +1379,15 @@ final class SiteController extends Controller
             $payload['domain'] = [$domain];
             $payload['domaintype'] = ['register'];
             $payload['regperiod'] = [$registrationPeriod];
-            return ['ok' => true, 'payload' => $this->appendNameservers($payload)];
+            return [
+                'ok' => true,
+                'payload' => $this->appendNameservers($payload),
+                'debug' => [
+                    'kind' => 'domain',
+                    'pid' => 0,
+                    'registration_period' => $registrationPeriod,
+                ],
+            ];
         }
 
         if (in_array($data['order_type'], ['hosting', 'bundle'], true)) {
@@ -1260,7 +1408,17 @@ final class SiteController extends Controller
                 $payload['domain'] = [$domain];
             }
 
-            return ['ok' => true, 'payload' => $this->appendNameservers($payload)];
+            return [
+                'ok' => true,
+                'payload' => $this->appendNameservers($payload),
+                'debug' => [
+                    'kind' => $data['order_type'],
+                    'plan' => (string) ($plan['slug'] ?? ''),
+                    'pid' => $pid,
+                    'billing_cycle' => (string) ($payload['billingcycle'][0] ?? ''),
+                    'registration_period' => $registrationPeriod,
+                ],
+            ];
         }
 
         $website = $config['website_package'] ?? [];
@@ -1290,7 +1448,16 @@ final class SiteController extends Controller
             $payload['priceoverride'] = [(string) $website['price_override']];
         }
 
-        return ['ok' => true, 'payload' => $this->appendNameservers($payload)];
+        return [
+            'ok' => true,
+            'payload' => $this->appendNameservers($payload),
+            'debug' => [
+                'kind' => 'website',
+                'pid' => $pid,
+                'billing_cycle' => (string) ($payload['billingcycle'][0] ?? 'onetime'),
+                'registration_period' => $registrationPeriod,
+            ],
+        ];
     }
 
     private function orderRegistersDomain(string $type): bool

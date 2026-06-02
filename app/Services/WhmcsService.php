@@ -245,7 +245,11 @@ final class WhmcsService
         ], $order));
 
         if (($decoded['result'] ?? '') !== 'success') {
-            return ['ok' => false, 'message' => $decoded['message'] ?? 'Unable to create WHMCS order.'];
+            return [
+                'ok' => false,
+                'message' => $decoded['message'] ?? 'Unable to create WHMCS order.',
+                'raw' => $decoded,
+            ];
         }
 
         return [
