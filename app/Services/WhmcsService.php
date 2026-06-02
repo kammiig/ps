@@ -331,7 +331,7 @@ final class WhmcsService
         ];
     }
 
-    public function invoiceForOrder(int $orderId, int $clientId): array
+    public function invoiceForOrder(int $orderId, int $clientId, float $expectedAmount = 0.0): array
     {
         if ($orderId <= 0 || $clientId <= 0) {
             return ['ok' => false, 'message' => 'Order and client references are required.'];
@@ -340,7 +340,7 @@ final class WhmcsService
         $lastMessage = 'Unable to load invoice for this order.';
 
         for ($attempt = 1; $attempt <= 3; $attempt++) {
-            $bridgeInvoice = $this->bridgeOrderInvoiceFallback($orderId, $clientId);
+            $bridgeInvoice = $this->bridgeOrderInvoiceFallback($orderId, $clientId, $expectedAmount);
             if ($bridgeInvoice['ok']) {
                 return $bridgeInvoice;
             }
@@ -410,18 +410,24 @@ final class WhmcsService
         ];
     }
 
-    private function bridgeOrderInvoiceFallback(int $orderId, int $clientId): array
+    private function bridgeOrderInvoiceFallback(int $orderId, int $clientId, float $expectedAmount = 0.0): array
     {
         if (!$this->hasBridge()) {
             return ['ok' => false, 'message' => 'The WHMCS bridge is not configured.'];
         }
 
-        $decoded = $this->callApi([
+        $payload = [
             'action' => 'PlaneticGetOrderInvoice',
             'orderid' => $orderId,
             'clientid' => $clientId,
             'responsetype' => 'json',
-        ]);
+        ];
+
+        if ($expectedAmount > 0) {
+            $payload['expected_amount'] = number_format($expectedAmount, 2, '.', '');
+        }
+
+        $decoded = $this->callApi($payload);
 
         if (($decoded['result'] ?? '') !== 'success') {
             return ['ok' => false, 'message' => $decoded['message'] ?? 'Unable to load order invoice through the WHMCS bridge.'];

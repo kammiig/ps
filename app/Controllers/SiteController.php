@@ -401,6 +401,8 @@ final class SiteController extends Controller
 
         $invoiceId = (int) ($order['invoice_id'] ?? 0);
         $orderId = (int) ($order['order_id'] ?? 0);
+        $expectedAmount = $this->expectedCheckoutAmount($data);
+        $invoiceMatchAmount = $this->checkoutInvoiceMatchAmount($data, $expectedAmount);
         if ($invoiceId <= 0) {
             $this->writeCheckoutLog('WHMCS AddOrder returned without an invoice reference.', [
                 'order_id' => $orderId,
@@ -415,7 +417,7 @@ final class SiteController extends Controller
         if ($invoiceId > 0) {
             $invoice = $this->whmcs->invoiceForClient($invoiceId, (int) $client['client_id'], $orderId);
         } else {
-            $invoice = $this->whmcs->invoiceForOrder($orderId, (int) $client['client_id']);
+            $invoice = $this->whmcs->invoiceForOrder($orderId, (int) $client['client_id'], $invoiceMatchAmount);
             $invoiceId = (int) ($invoice['invoice']['invoiceid'] ?? $invoice['invoice']['id'] ?? 0);
         }
 
@@ -438,9 +440,15 @@ final class SiteController extends Controller
             return $this->checkout(['The invoice could not be matched to your account. Please contact support.'], $data);
         }
 
+        $invoiceData = $this->checkoutInvoiceMatchingExpectedAmount($invoiceData, $invoiceId, $orderId, (int) $client['client_id'], $invoiceMatchAmount, $data);
+        if (!$invoiceData['ok']) {
+            return $this->checkout([$invoiceData['message']], $data);
+        }
+        $invoiceData = $invoiceData['invoice'];
+        $invoiceId = (int) ($invoiceData['invoiceid'] ?? $invoiceData['id'] ?? $invoiceId);
+
         $amount = $this->invoiceAmountDue($invoiceData);
         if ($amount <= 0) {
-            $expectedAmount = $this->expectedCheckoutAmount($data);
             if ($expectedAmount <= 0) {
                 return $this->checkout(['This invoice does not have a payable balance. Please contact support if this looks wrong.'], $data);
             }
@@ -842,6 +850,80 @@ final class SiteController extends Controller
     private function invoiceClientId(array $invoice): int
     {
         return (int) ($invoice['userid'] ?? $invoice['clientid'] ?? $invoice['user_id'] ?? 0);
+    }
+
+    private function checkoutInvoiceMatchAmount(array $data, float $expectedAmount): float
+    {
+        return ($data['order_type'] ?? '') === 'domain' ? 0.0 : $expectedAmount;
+    }
+
+    private function checkoutInvoiceMatchingExpectedAmount(array $invoice, int $invoiceId, int $orderId, int $clientId, float $expectedAmount, array $data): array
+    {
+        if ($expectedAmount <= 0) {
+            return ['ok' => true, 'invoice' => $invoice];
+        }
+
+        $status = strtolower((string) ($invoice['status'] ?? ''));
+        $amount = $this->invoiceAmountDue($invoice);
+        if ($status !== 'paid' && ($amount <= 0 || $this->moneyAmountsMatch($amount, $expectedAmount))) {
+            return ['ok' => true, 'invoice' => $invoice];
+        }
+
+        $this->writeCheckoutLog('Checkout invoice did not match selected package amount.', [
+            'invoice_id' => $invoiceId,
+            'order_id' => $orderId,
+            'client_id' => $clientId,
+            'order_type' => $data['order_type'] ?? '',
+            'hosting_plan' => $data['hosting_plan'] ?? '',
+            'invoice_status' => $invoice['status'] ?? '',
+            'invoice_amount' => number_format($amount, 2, '.', ''),
+            'expected_amount' => number_format($expectedAmount, 2, '.', ''),
+        ]);
+
+        if ($orderId > 0) {
+            $matched = $this->whmcs->invoiceForOrder($orderId, $clientId, $expectedAmount);
+            if ($matched['ok']) {
+                $matchedInvoice = (array) ($matched['invoice'] ?? []);
+                $matchedStatus = strtolower((string) ($matchedInvoice['status'] ?? ''));
+                $matchedAmount = $this->invoiceAmountDue($matchedInvoice);
+                if ($matchedStatus !== 'paid' && $this->moneyAmountsMatch($matchedAmount, $expectedAmount)) {
+                    $this->writeCheckoutLog('Using WHMCS order invoice matched by selected package amount.', [
+                        'original_invoice_id' => $invoiceId,
+                        'matched_invoice_id' => (int) ($matchedInvoice['invoiceid'] ?? $matchedInvoice['id'] ?? 0),
+                        'order_id' => $orderId,
+                        'amount' => number_format($matchedAmount, 2, '.', ''),
+                    ]);
+
+                    return ['ok' => true, 'invoice' => $matchedInvoice];
+                }
+
+                $this->writeCheckoutLog('WHMCS order invoice lookup returned a non-matching invoice.', [
+                    'invoice_id' => (int) ($matchedInvoice['invoiceid'] ?? $matchedInvoice['id'] ?? 0),
+                    'order_id' => $orderId,
+                    'invoice_status' => $matchedInvoice['status'] ?? '',
+                    'invoice_amount' => number_format($matchedAmount, 2, '.', ''),
+                    'expected_amount' => number_format($expectedAmount, 2, '.', ''),
+                ]);
+            } else {
+                $this->writeCheckoutLog('Unable to resolve a matching WHMCS order invoice.', [
+                    'invoice_id' => $invoiceId,
+                    'order_id' => $orderId,
+                    'client_id' => $clientId,
+                    'expected_amount' => number_format($expectedAmount, 2, '.', ''),
+                    'message' => $matched['message'] ?? '',
+                ]);
+            }
+        }
+
+        return [
+            'ok' => false,
+            'message' => 'Your order was created, but the billing invoice amount did not match your selected package. Please contact support before paying.',
+        ];
+    }
+
+    private function moneyAmountsMatch(float $first, float $second): bool
+    {
+        return abs(round($first, 2) - round($second, 2)) <= 0.01;
     }
 
     private function fallbackInvoiceForCheckout(int $invoiceId, int $orderId, int $clientId, array $data, string $message = ''): array

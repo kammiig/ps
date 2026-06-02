@@ -11,7 +11,7 @@ declare(strict_types=1);
  * WHMCS_LOCAL_API_BRIDGE_TOKEN=change_this_long_random_token
  */
 
-define('PLANETIC_BRIDGE_VERSION', '2026-06-03-checkout-hosting-precheck-v2');
+define('PLANETIC_BRIDGE_VERSION', '2026-06-03-invoice-amount-match-v3');
 
 $bridgeToken = 'change_this_long_random_token';
 $adminUsername = '';
@@ -188,11 +188,66 @@ function planeticBridgeInvoiceIdsFromItems(int $clientId, array $relIds, array $
     return array_values(array_unique($invoiceIds));
 }
 
-function planeticBridgeResolveOrderInvoiceId(array $order, int $orderId, int $clientId): int
+function planeticBridgeInvoiceRow(int $invoiceId, int $clientId)
 {
+    if ($invoiceId <= 0 || $clientId <= 0) {
+        return null;
+    }
+
+    return \WHMCS\Database\Capsule::table('tblinvoices')
+        ->where('id', $invoiceId)
+        ->where('userid', $clientId)
+        ->first();
+}
+
+function planeticBridgeInvoicePayableAmount(array $invoice): float
+{
+    if (strtolower((string) ($invoice['status'] ?? '')) === 'paid') {
+        return 0.0;
+    }
+
+    $total = round((float) ($invoice['total'] ?? 0), 2);
+    $credit = round((float) ($invoice['credit'] ?? 0), 2);
+    return max(0.0, round($total - $credit, 2));
+}
+
+function planeticBridgeInvoiceMatchesExpected(array $invoice, float $expectedAmount): bool
+{
+    if ($expectedAmount <= 0) {
+        return true;
+    }
+
+    return abs(planeticBridgeInvoicePayableAmount($invoice) - round($expectedAmount, 2)) <= 0.01;
+}
+
+function planeticBridgeFirstMatchingInvoiceId(int $clientId, array $invoiceIds, float $expectedAmount): int
+{
+    $firstExisting = 0;
+    foreach (array_values(array_unique($invoiceIds)) as $candidateId) {
+        $candidate = planeticBridgeInvoiceRow((int) $candidateId, $clientId);
+        if (!$candidate) {
+            continue;
+        }
+
+        if ($firstExisting <= 0) {
+            $firstExisting = (int) $candidateId;
+        }
+
+        if (planeticBridgeInvoiceMatchesExpected((array) $candidate, $expectedAmount)) {
+            return (int) $candidateId;
+        }
+    }
+
+    return $expectedAmount > 0 ? 0 : $firstExisting;
+}
+
+function planeticBridgeResolveOrderInvoiceId(array $order, int $orderId, int $clientId, float $expectedAmount = 0.0): int
+{
+    $candidateIds = [];
+
     $invoiceId = (int) ($order['invoiceid'] ?? 0);
     if ($invoiceId > 0) {
-        return $invoiceId;
+        $candidateIds[] = $invoiceId;
     }
 
     $hostingIds = planeticBridgeIdsFromRows(
@@ -213,16 +268,11 @@ function planeticBridgeResolveOrderInvoiceId(array $order, int $orderId, int $cl
         planeticBridgeInvoiceIdsFromItems($clientId, $hostingIds, ['Hosting', 'Setup', 'Addon']),
         planeticBridgeInvoiceIdsFromItems($clientId, $domainIds, ['DomainRegister', 'DomainTransfer', 'DomainRenew', 'Domain'])
     );
+    $candidateIds = array_merge($candidateIds, $candidates);
 
-    foreach (array_values(array_unique($candidates)) as $candidateId) {
-        $candidate = \WHMCS\Database\Capsule::table('tblinvoices')
-            ->where('id', (int) $candidateId)
-            ->where('userid', $clientId)
-            ->first();
-
-        if ($candidate) {
-            return (int) $candidateId;
-        }
+    $matchedCandidate = planeticBridgeFirstMatchingInvoiceId($clientId, $candidateIds, $expectedAmount);
+    if ($matchedCandidate > 0) {
+        return $matchedCandidate;
     }
 
     $orderDate = (string) ($order['date'] ?? $order['datecreated'] ?? '');
@@ -238,12 +288,19 @@ function planeticBridgeResolveOrderInvoiceId(array $order, int $orderId, int $cl
         ->where('date', '>=', substr($orderDate, 0, 10))
         ->orderBy('id', 'desc');
 
-    if ($orderAmount > 0) {
+    if ($expectedAmount > 0) {
+        $recentQuery->where('total', number_format($expectedAmount, 2, '.', ''));
+    } elseif ($orderAmount > 0) {
         $recentQuery->where('total', number_format($orderAmount, 2, '.', ''));
     }
 
     $recent = $recentQuery->first();
-    return $recent ? (int) ((array) $recent)['id'] : 0;
+    if (!$recent) {
+        return 0;
+    }
+
+    $recent = (array) $recent;
+    return planeticBridgeInvoiceMatchesExpected($recent, $expectedAmount) ? (int) $recent['id'] : 0;
 }
 
 if ($action === 'PlaneticGetInvoice') {
@@ -287,6 +344,7 @@ if ($action === 'PlaneticGetInvoice') {
 if ($action === 'PlaneticGetOrderInvoice') {
     $orderId = (int) ($params['orderid'] ?? 0);
     $clientId = (int) ($params['clientid'] ?? $params['userid'] ?? 0);
+    $expectedAmount = round((float) ($params['expected_amount'] ?? 0), 2);
 
     if ($orderId <= 0 || $clientId <= 0) {
         http_response_code(422);
@@ -310,7 +368,7 @@ if ($action === 'PlaneticGetOrderInvoice') {
         }
 
         $order = (array) $orderRow;
-        $invoiceId = planeticBridgeResolveOrderInvoiceId($order, $orderId, $clientId);
+        $invoiceId = planeticBridgeResolveOrderInvoiceId($order, $orderId, $clientId, $expectedAmount);
         if ($invoiceId <= 0) {
             echo json_encode(['result' => 'error', 'message' => 'Order has no invoice attached.']);
             exit;
