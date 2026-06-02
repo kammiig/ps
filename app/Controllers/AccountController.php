@@ -277,24 +277,58 @@ final class AccountController extends Controller
         return $this->render('account/dns', $this->baseData('account-dns', [
             'account' => $account,
             'domains' => array_map([$this, 'accountDomain'], $this->clientDomains($account)),
-            'dnsOpenUrl' => url('/account/dns/open'),
         ]));
     }
 
     public function openDns(): string
     {
+        $this->requireCustomer();
+        $this->redirect(url('/account/dns'));
+    }
+
+    public function manageDns(string $domainId): string
+    {
         $account = $this->fullUser($this->requireCustomer());
-        $clientId = (int) ($account['whmcs_client_id'] ?? 0);
-        if ($clientId <= 0) {
+        $domain = $this->ownedDomain($account, (int) $domainId);
+        if (!$domain) {
             $this->redirect(url('/account/dns'));
         }
 
-        $token = $this->whmcs->createSsoToken($clientId, 'clientarea:domains');
-        if (!empty($token['ok']) && (string) ($token['redirect_url'] ?? '') !== '') {
-            $this->redirect((string) $token['redirect_url']);
+        $errors = [];
+        $saved = false;
+        $nameservers = $this->blankNameservers();
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            if (!Csrf::verify($_POST['_csrf'] ?? null)) {
+                $errors[] = 'Your security token expired. Please try again.';
+            } else {
+                [$nameservers, $errors] = $this->validateNameservers($_POST);
+                if (!$errors) {
+                    $updated = $this->whmcs->updateDomainNameservers((int) $domainId, $nameservers);
+                    if (!empty($updated['ok'])) {
+                        $saved = true;
+                        $this->clearCachedWhmcsRead((int) ($account['whmcs_client_id'] ?? 0), 'domains');
+                    } else {
+                        $errors[] = $this->publicDnsMessage((string) ($updated['message'] ?? ''));
+                    }
+                }
+            }
+        } else {
+            $loaded = $this->whmcs->nameserversForDomain((int) $domainId);
+            if (!empty($loaded['ok'])) {
+                $nameservers = array_replace($nameservers, $loaded['nameservers'] ?? []);
+            } else {
+                $errors[] = $this->publicDnsMessage((string) ($loaded['message'] ?? ''));
+            }
         }
 
-        $this->redirect($this->whmcs->domainManagementUrl());
+        return $this->render('account/dns-manage', $this->baseData('account-dns', [
+            'account' => $account,
+            'domain' => $this->accountDomain($domain),
+            'nameservers' => $nameservers,
+            'errors' => $errors,
+            'saved' => $saved,
+        ]));
     }
 
     public function profile(array $errors = [], bool $saved = false): string
@@ -370,7 +404,78 @@ final class AccountController extends Controller
     {
         $domainId = (int) ($domain['id'] ?? $domain['domainid'] ?? 0);
         $domain['management_url'] = $this->whmcs->domainManagementUrl($domainId);
+        $domain['dns_url'] = $domainId > 0 ? url('/account/dns/' . $domainId) : url('/account/dns');
         return $domain;
+    }
+
+    private function ownedDomain(array $account, int $domainId): ?array
+    {
+        if ($domainId <= 0) {
+            return null;
+        }
+
+        foreach ($this->clientDomains($account) as $domain) {
+            $candidateId = (int) ($domain['id'] ?? $domain['domainid'] ?? 0);
+            if ($candidateId === $domainId) {
+                return $domain;
+            }
+        }
+
+        return null;
+    }
+
+    private function blankNameservers(): array
+    {
+        return [1 => '', 2 => '', 3 => '', 4 => '', 5 => ''];
+    }
+
+    private function validateNameservers(array $input): array
+    {
+        $nameservers = $this->blankNameservers();
+        $errors = [];
+
+        for ($index = 1; $index <= 5; $index++) {
+            $value = strtolower(trim((string) ($input['ns' . $index] ?? '')));
+            $value = rtrim($value, '.');
+            $nameservers[$index] = $value;
+
+            if ($value === '') {
+                continue;
+            }
+
+            if (!$this->isValidNameserver($value)) {
+                $errors[] = 'Nameserver ' . $index . ' must be a valid hostname, for example ns1.example.com.';
+            }
+        }
+
+        if ($nameservers[1] === '' || $nameservers[2] === '') {
+            $errors[] = 'Nameserver 1 and nameserver 2 are required.';
+        }
+
+        return [$nameservers, array_values(array_unique($errors))];
+    }
+
+    private function isValidNameserver(string $hostname): bool
+    {
+        if (strlen($hostname) > 253 || !str_contains($hostname, '.')) {
+            return false;
+        }
+
+        return (bool) preg_match('/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i', $hostname);
+    }
+
+    private function publicDnsMessage(string $message): string
+    {
+        $lower = strtolower($message);
+        if (str_contains($lower, 'bridge action is not allowed')) {
+            return 'DNS management needs the latest WHMCS bridge file uploaded to the client area folder.';
+        }
+
+        if (str_contains($lower, 'not found')) {
+            return 'This domain could not be found in your account.';
+        }
+
+        return 'DNS settings could not be updated right now. Please try again shortly or contact support.';
     }
 
     private function cachedWhmcsRead(int $clientId, string $key, callable $loader, bool $allowLiveLoad = true): array
@@ -409,6 +514,18 @@ final class AccountController extends Controller
         ], JSON_UNESCAPED_SLASHES));
 
         return $payload;
+    }
+
+    private function clearCachedWhmcsRead(int $clientId, string $key): void
+    {
+        if ($clientId <= 0) {
+            return;
+        }
+
+        $file = STORAGE_PATH . '/cache/account-whmcs/' . sha1($clientId . ':' . $key) . '.json';
+        if (is_file($file)) {
+            @unlink($file);
+        }
     }
 
     private function safeRecentPayments(int $customerId, int $limit): array

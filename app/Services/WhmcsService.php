@@ -250,8 +250,8 @@ final class WhmcsService
 
         return [
             'ok' => true,
-            'order_id' => (int) ($decoded['orderid'] ?? $decoded['order_id'] ?? $decoded['orderId'] ?? 0),
-            'invoice_id' => (int) ($decoded['invoiceid'] ?? $decoded['invoice_id'] ?? $decoded['invoiceId'] ?? 0),
+            'order_id' => $this->firstApiInt($decoded, ['orderid', 'order_id', 'orderId']),
+            'invoice_id' => $this->firstApiInt($decoded, ['invoiceid', 'invoice_id', 'invoiceId']),
             'service_ids' => (string) ($decoded['serviceids'] ?? ''),
             'domain_ids' => (string) ($decoded['domainids'] ?? ''),
             'raw' => $decoded,
@@ -558,6 +558,52 @@ final class WhmcsService
         ];
     }
 
+    public function nameserversForDomain(int $domainId): array
+    {
+        if ($domainId <= 0) {
+            return ['ok' => false, 'message' => 'A valid domain reference is required.'];
+        }
+
+        $decoded = $this->callApi([
+            'action' => 'DomainGetNameservers',
+            'domainid' => $domainId,
+            'responsetype' => 'json',
+        ]);
+
+        if (($decoded['result'] ?? '') !== 'success') {
+            return ['ok' => false, 'message' => $decoded['message'] ?? 'Unable to load nameservers.'];
+        }
+
+        return [
+            'ok' => true,
+            'nameservers' => $this->normaliseNameservers($decoded),
+        ];
+    }
+
+    public function updateDomainNameservers(int $domainId, array $nameservers): array
+    {
+        if ($domainId <= 0) {
+            return ['ok' => false, 'message' => 'A valid domain reference is required.'];
+        }
+
+        $payload = [
+            'action' => 'DomainUpdateNameservers',
+            'domainid' => $domainId,
+            'responsetype' => 'json',
+        ];
+
+        for ($index = 1; $index <= 5; $index++) {
+            $payload['ns' . $index] = (string) ($nameservers[$index] ?? '');
+        }
+
+        $decoded = $this->callApi($payload);
+        if (($decoded['result'] ?? '') !== 'success') {
+            return ['ok' => false, 'message' => $decoded['message'] ?? 'Unable to update nameservers.'];
+        }
+
+        return ['ok' => true];
+    }
+
     public function updateClient(int $clientId, array $client): array
     {
         $decoded = $this->callApi(array_merge([
@@ -859,12 +905,49 @@ final class WhmcsService
 
     private function isAccountReadAction(string $action): bool
     {
-        return in_array($action, ['GetClientsProducts', 'GetClientsDomains', 'GetInvoices'], true);
+        return in_array($action, ['GetClientsProducts', 'GetClientsDomains', 'GetInvoices', 'DomainGetNameservers'], true);
     }
 
     private function canRetryApiAction(string $action): bool
     {
-        return in_array($action, ['DomainWhois', 'GetTLDPricing', 'GetProducts', 'GetClientsDetails', 'GetInvoice', 'GetInvoices', 'GetOrders', 'PlaneticGetInvoice', 'PlaneticGetOrderInvoice', 'GetClientsProducts', 'GetClientsDomains'], true);
+        return in_array($action, ['DomainWhois', 'GetTLDPricing', 'GetProducts', 'GetClientsDetails', 'GetInvoice', 'GetInvoices', 'GetOrders', 'PlaneticGetInvoice', 'PlaneticGetOrderInvoice', 'GetClientsProducts', 'GetClientsDomains', 'DomainGetNameservers'], true);
+    }
+
+    private function firstApiInt(array $payload, array $keys): int
+    {
+        foreach ($keys as $key) {
+            if (isset($payload[$key]) && is_scalar($payload[$key]) && (int) $payload[$key] > 0) {
+                return (int) $payload[$key];
+            }
+        }
+
+        foreach ($payload as $value) {
+            if (is_array($value)) {
+                $found = $this->firstApiInt($value, $keys);
+                if ($found > 0) {
+                    return $found;
+                }
+            }
+        }
+
+        return 0;
+    }
+
+    private function normaliseNameservers(array $decoded): array
+    {
+        $nameservers = [];
+        $nested = isset($decoded['nameservers']) && is_array($decoded['nameservers']) ? $decoded['nameservers'] : [];
+        for ($index = 1; $index <= 5; $index++) {
+            $value = $decoded['ns' . $index]
+                ?? $decoded['nameserver' . $index]
+                ?? $nested['ns' . $index]
+                ?? $nested['nameserver' . $index]
+                ?? '';
+
+            $nameservers[$index] = strtolower(trim((string) $value));
+        }
+
+        return $nameservers;
     }
 
     private function normaliseApiList(mixed $items): array

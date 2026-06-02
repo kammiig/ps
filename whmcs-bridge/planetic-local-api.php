@@ -11,7 +11,7 @@ declare(strict_types=1);
  * WHMCS_LOCAL_API_BRIDGE_TOKEN=change_this_long_random_token
  */
 
-define('PLANETIC_BRIDGE_VERSION', '2026-05-30-order-invoice-v4');
+define('PLANETIC_BRIDGE_VERSION', '2026-06-02-hosting-invoice-dns-v1');
 
 $bridgeToken = 'change_this_long_random_token';
 $adminUsername = '';
@@ -51,6 +51,8 @@ $allowedActions = [
     'GetClientsProducts',
     'GetClientsDomains',
     'UpdateClient',
+    'DomainGetNameservers',
+    'DomainUpdateNameservers',
 ];
 
 $action = (string) ($_POST['action'] ?? '');
@@ -102,6 +104,148 @@ unset(
     $params['responsetype']
 );
 
+function planeticBridgeCurrency(int $clientId): array
+{
+    $currencyId = (int) \WHMCS\Database\Capsule::table('tblclients')
+        ->where('id', $clientId)
+        ->value('currency');
+
+    $currencyRow = $currencyId > 0
+        ? \WHMCS\Database\Capsule::table('tblcurrencies')->where('id', $currencyId)->first()
+        : null;
+
+    return $currencyRow ? (array) $currencyRow : [];
+}
+
+function planeticBridgeInvoicePayload(array $invoice, int $invoiceId, int $clientId, int $orderId = 0): array
+{
+    $status = (string) ($invoice['status'] ?? 'Unpaid');
+    $total = round((float) ($invoice['total'] ?? 0), 2);
+    $credit = round((float) ($invoice['credit'] ?? 0), 2);
+    $balance = strtolower($status) === 'paid' ? 0.0 : max(0.0, round($total - $credit, 2));
+    $currency = planeticBridgeCurrency($clientId);
+
+    return [
+        'invoiceid' => $invoiceId,
+        'id' => $invoiceId,
+        'userid' => $clientId,
+        'clientid' => $clientId,
+        'orderid' => $orderId,
+        'invoicenum' => $invoice['invoicenum'] ?? '',
+        'date' => $invoice['date'] ?? '',
+        'duedate' => $invoice['duedate'] ?? '',
+        'subtotal' => number_format((float) ($invoice['subtotal'] ?? $total), 2, '.', ''),
+        'credit' => number_format($credit, 2, '.', ''),
+        'total' => number_format($total, 2, '.', ''),
+        'balance' => number_format($balance, 2, '.', ''),
+        'status' => $status,
+        'paymentmethod' => $invoice['paymentmethod'] ?? '',
+        'currencycode' => (string) ($currency['code'] ?? 'GBP'),
+        'currency' => [
+            'code' => (string) ($currency['code'] ?? 'GBP'),
+            'prefix' => (string) ($currency['prefix'] ?? ''),
+            'suffix' => (string) ($currency['suffix'] ?? ''),
+        ],
+    ];
+}
+
+function planeticBridgeIdsFromRows($rows): array
+{
+    $ids = [];
+    foreach ($rows as $row) {
+        $row = (array) $row;
+        $id = (int) ($row['id'] ?? 0);
+        if ($id > 0) {
+            $ids[] = $id;
+        }
+    }
+
+    return array_values(array_unique($ids));
+}
+
+function planeticBridgeInvoiceIdsFromItems(int $clientId, array $relIds, array $types): array
+{
+    if ($relIds === []) {
+        return [];
+    }
+
+    $rows = \WHMCS\Database\Capsule::table('tblinvoiceitems')
+        ->where('userid', $clientId)
+        ->whereIn('relid', $relIds)
+        ->whereIn('type', $types)
+        ->orderBy('invoiceid', 'desc')
+        ->get();
+
+    $invoiceIds = [];
+    foreach ($rows as $row) {
+        $row = (array) $row;
+        $invoiceId = (int) ($row['invoiceid'] ?? 0);
+        if ($invoiceId > 0) {
+            $invoiceIds[] = $invoiceId;
+        }
+    }
+
+    return array_values(array_unique($invoiceIds));
+}
+
+function planeticBridgeResolveOrderInvoiceId(array $order, int $orderId, int $clientId): int
+{
+    $invoiceId = (int) ($order['invoiceid'] ?? 0);
+    if ($invoiceId > 0) {
+        return $invoiceId;
+    }
+
+    $hostingIds = planeticBridgeIdsFromRows(
+        \WHMCS\Database\Capsule::table('tblhosting')
+            ->where('orderid', $orderId)
+            ->where('userid', $clientId)
+            ->get()
+    );
+
+    $domainIds = planeticBridgeIdsFromRows(
+        \WHMCS\Database\Capsule::table('tbldomains')
+            ->where('orderid', $orderId)
+            ->where('userid', $clientId)
+            ->get()
+    );
+
+    $candidates = array_merge(
+        planeticBridgeInvoiceIdsFromItems($clientId, $hostingIds, ['Hosting', 'Setup', 'Addon']),
+        planeticBridgeInvoiceIdsFromItems($clientId, $domainIds, ['DomainRegister', 'DomainTransfer', 'DomainRenew', 'Domain'])
+    );
+
+    foreach (array_values(array_unique($candidates)) as $candidateId) {
+        $candidate = \WHMCS\Database\Capsule::table('tblinvoices')
+            ->where('id', (int) $candidateId)
+            ->where('userid', $clientId)
+            ->first();
+
+        if ($candidate) {
+            return (int) $candidateId;
+        }
+    }
+
+    $orderDate = (string) ($order['date'] ?? $order['datecreated'] ?? '');
+    if ($orderDate === '') {
+        return 0;
+    }
+
+    $orderAmount = round((float) ($order['amount'] ?? 0), 2);
+    $recentQuery = \WHMCS\Database\Capsule::table('tblinvoices')
+        ->where('userid', $clientId)
+        ->where('status', 'Unpaid')
+        ->where('total', '>', 0)
+        ->where('date', '>=', substr($orderDate, 0, 10))
+        ->orderBy('id', 'desc');
+
+    if ($orderAmount > 0) {
+        $recentQuery->where('total', number_format($orderAmount, 2, '.', ''));
+    }
+
+    $recent = $recentQuery->first();
+    return $recent ? (int) ((array) $recent)['id'] : 0;
+}
+
 if ($action === 'PlaneticGetInvoice') {
     $invoiceId = (int) ($params['invoiceid'] ?? 0);
     $clientId = (int) ($params['clientid'] ?? $params['userid'] ?? 0);
@@ -128,44 +272,9 @@ if ($action === 'PlaneticGetInvoice') {
             exit;
         }
 
-        $invoice = (array) $invoiceRow;
-        $status = (string) ($invoice['status'] ?? 'Unpaid');
-        $total = round((float) ($invoice['total'] ?? 0), 2);
-        $credit = round((float) ($invoice['credit'] ?? 0), 2);
-        $balance = strtolower($status) === 'paid' ? 0.0 : max(0.0, round($total - $credit, 2));
-
-        $currencyId = (int) \WHMCS\Database\Capsule::table('tblclients')
-            ->where('id', $clientId)
-            ->value('currency');
-        $currencyRow = $currencyId > 0
-            ? \WHMCS\Database\Capsule::table('tblcurrencies')->where('id', $currencyId)->first()
-            : null;
-        $currency = $currencyRow ? (array) $currencyRow : [];
-
         echo json_encode([
             'result' => 'success',
-            'invoice' => [
-                'invoiceid' => $invoiceId,
-                'id' => $invoiceId,
-                'userid' => $clientId,
-                'clientid' => $clientId,
-                'orderid' => $orderId,
-                'invoicenum' => $invoice['invoicenum'] ?? '',
-                'date' => $invoice['date'] ?? '',
-                'duedate' => $invoice['duedate'] ?? '',
-                'subtotal' => number_format((float) ($invoice['subtotal'] ?? $total), 2, '.', ''),
-                'credit' => number_format($credit, 2, '.', ''),
-                'total' => number_format($total, 2, '.', ''),
-                'balance' => number_format($balance, 2, '.', ''),
-                'status' => $status,
-                'paymentmethod' => $invoice['paymentmethod'] ?? '',
-                'currencycode' => (string) ($currency['code'] ?? 'GBP'),
-                'currency' => [
-                    'code' => (string) ($currency['code'] ?? 'GBP'),
-                    'prefix' => (string) ($currency['prefix'] ?? ''),
-                    'suffix' => (string) ($currency['suffix'] ?? ''),
-                ],
-            ],
+            'invoice' => planeticBridgeInvoicePayload((array) $invoiceRow, $invoiceId, $clientId, $orderId),
         ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         exit;
     } catch (Throwable) {
@@ -201,7 +310,7 @@ if ($action === 'PlaneticGetOrderInvoice') {
         }
 
         $order = (array) $orderRow;
-        $invoiceId = (int) ($order['invoiceid'] ?? 0);
+        $invoiceId = planeticBridgeResolveOrderInvoiceId($order, $orderId, $clientId);
         if ($invoiceId <= 0) {
             echo json_encode(['result' => 'error', 'message' => 'Order has no invoice attached.']);
             exit;
@@ -217,44 +326,9 @@ if ($action === 'PlaneticGetOrderInvoice') {
             exit;
         }
 
-        $invoice = (array) $invoiceRow;
-        $status = (string) ($invoice['status'] ?? 'Unpaid');
-        $total = round((float) ($invoice['total'] ?? 0), 2);
-        $credit = round((float) ($invoice['credit'] ?? 0), 2);
-        $balance = strtolower($status) === 'paid' ? 0.0 : max(0.0, round($total - $credit, 2));
-
-        $currencyId = (int) \WHMCS\Database\Capsule::table('tblclients')
-            ->where('id', $clientId)
-            ->value('currency');
-        $currencyRow = $currencyId > 0
-            ? \WHMCS\Database\Capsule::table('tblcurrencies')->where('id', $currencyId)->first()
-            : null;
-        $currency = $currencyRow ? (array) $currencyRow : [];
-
         echo json_encode([
             'result' => 'success',
-            'invoice' => [
-                'invoiceid' => $invoiceId,
-                'id' => $invoiceId,
-                'userid' => $clientId,
-                'clientid' => $clientId,
-                'orderid' => $orderId,
-                'invoicenum' => $invoice['invoicenum'] ?? '',
-                'date' => $invoice['date'] ?? '',
-                'duedate' => $invoice['duedate'] ?? '',
-                'subtotal' => number_format((float) ($invoice['subtotal'] ?? $total), 2, '.', ''),
-                'credit' => number_format($credit, 2, '.', ''),
-                'total' => number_format($total, 2, '.', ''),
-                'balance' => number_format($balance, 2, '.', ''),
-                'status' => $status,
-                'paymentmethod' => $invoice['paymentmethod'] ?? '',
-                'currencycode' => (string) ($currency['code'] ?? 'GBP'),
-                'currency' => [
-                    'code' => (string) ($currency['code'] ?? 'GBP'),
-                    'prefix' => (string) ($currency['prefix'] ?? ''),
-                    'suffix' => (string) ($currency['suffix'] ?? ''),
-                ],
-            ],
+            'invoice' => planeticBridgeInvoicePayload((array) $invoiceRow, $invoiceId, $clientId, $orderId),
         ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         exit;
     } catch (Throwable) {

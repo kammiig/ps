@@ -5,15 +5,15 @@
             <div class="account-head">
                 <span class="section-kicker">DNS management</span>
                 <h1>Manage domain DNS</h1>
-                <p>Open the secure domain manager for DNS records, nameservers and domain settings linked to your Planetic Solutions account.</p>
+                <p>Manage nameservers for domains linked to your Planetic Solutions account without leaving the website.</p>
             </div>
 
             <section class="account-card dns-intro-card">
                 <div>
-                    <h2>Domain DNS tools</h2>
-                    <p>Your domains stay connected to the billing system, but you can start DNS management from your Planetic Solutions account.</p>
+                    <h2>Nameserver tools</h2>
+                    <p>Choose a domain below to update the nameservers used by your hosting, website or DNS provider.</p>
                 </div>
-                <a class="btn btn-primary" href="<?= e($dnsOpenUrl) ?>">Open DNS Manager <?= icon('arrow') ?></a>
+                <a class="btn btn-outline" href="<?= e(url('/contact')) ?>">Need Help?</a>
             </section>
 
             <section class="account-card">
@@ -31,6 +31,7 @@
                             $domainName = (string) ($domain['domainname'] ?? $domain['domain'] ?? 'Domain');
                             $renewal = (string) ($domain['nextduedate'] ?? 'Not available');
                             $status = (string) ($domain['status'] ?? 'Processing');
+                            $dnsUrl = (string) ($domain['dns_url'] ?? url('/account/dns'));
                             ?>
                             <div class="account-row">
                                 <div>
@@ -39,7 +40,7 @@
                                 </div>
                                 <div class="account-row-actions">
                                     <span class="status-pill"><?= e($status) ?></span>
-                                    <a class="btn btn-outline btn-small" href="<?= e($dnsOpenUrl) ?>">Manage DNS</a>
+                                    <a class="btn btn-outline btn-small" href="<?= e($dnsUrl) ?>">Manage DNS</a>
                                 </div>
                             </div>
                         <?php endforeach; ?>

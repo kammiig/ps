@@ -383,6 +383,16 @@ final class SiteController extends Controller
 
         $invoiceId = (int) ($order['invoice_id'] ?? 0);
         $orderId = (int) ($order['order_id'] ?? 0);
+        if ($invoiceId <= 0) {
+            $this->writeCheckoutLog('WHMCS AddOrder returned without an invoice reference.', [
+                'order_id' => $orderId,
+                'client_id' => (int) $client['client_id'],
+                'order_type' => $data['order_type'] ?? '',
+                'service_ids' => $order['service_ids'] ?? '',
+                'domain_ids' => $order['domain_ids'] ?? '',
+                'response_keys' => array_keys((array) ($order['raw'] ?? [])),
+            ]);
+        }
 
         if ($invoiceId > 0) {
             $invoice = $this->whmcs->invoiceForClient($invoiceId, (int) $client['client_id'], $orderId);
