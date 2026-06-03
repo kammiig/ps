@@ -256,7 +256,7 @@ final class WhmcsService
             'ok' => true,
             'order_id' => $this->firstApiInt($decoded, ['orderid', 'order_id', 'orderId']),
             'invoice_id' => $this->firstApiInt($decoded, ['invoiceid', 'invoice_id', 'invoiceId']),
-            'service_ids' => (string) ($decoded['serviceids'] ?? ''),
+            'service_ids' => (string) ($decoded['serviceids'] ?? $decoded['productids'] ?? ''),
             'domain_ids' => (string) ($decoded['domainids'] ?? ''),
             'raw' => $decoded,
         ];

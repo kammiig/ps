@@ -392,6 +392,9 @@ final class SiteController extends Controller
                 'hosting_plan' => $data['hosting_plan'],
                 'billing_cycle' => $data['billing_cycle'],
                 'pid' => $orderPayload['debug']['pid'] ?? 0,
+                'configured_pid' => $orderPayload['debug']['configured_pid'] ?? 0,
+                'pid_source' => $orderPayload['debug']['pid_source'] ?? '',
+                'priceoverride' => $orderPayload['debug']['priceoverride'] ?? '',
                 'payload_keys' => array_keys((array) ($orderPayload['payload'] ?? [])),
                 'message' => $order['message'] ?? '',
                 'response_keys' => array_keys((array) ($order['raw'] ?? [])),
@@ -410,6 +413,10 @@ final class SiteController extends Controller
                 'order_type' => $data['order_type'] ?? '',
                 'service_ids' => $order['service_ids'] ?? '',
                 'domain_ids' => $order['domain_ids'] ?? '',
+                'pid' => $orderPayload['debug']['pid'] ?? 0,
+                'configured_pid' => $orderPayload['debug']['configured_pid'] ?? 0,
+                'pid_source' => $orderPayload['debug']['pid_source'] ?? '',
+                'priceoverride' => $orderPayload['debug']['priceoverride'] ?? '',
                 'response_keys' => array_keys((array) ($order['raw'] ?? [])),
             ]);
         }
@@ -1396,6 +1403,53 @@ final class SiteController extends Controller
         return 0;
     }
 
+    private function resolveCheckoutPlanPid(array $plan): array
+    {
+        $configuredPid = (int) ($plan['checkout_pid'] ?? 0);
+        $matchedPid = $this->matchedWhmcsProductPid((string) ($plan['title'] ?? ''));
+        if ($matchedPid > 0) {
+            return [
+                'pid' => $matchedPid,
+                'configured_pid' => $configuredPid,
+                'source' => $matchedPid === $configuredPid ? 'configured_confirmed_by_name' : 'whmcs_product_name_match',
+            ];
+        }
+
+        return [
+            'pid' => $configuredPid,
+            'configured_pid' => $configuredPid,
+            'source' => 'configured',
+        ];
+    }
+
+    private function resolveWebsitePackagePid(array $website): array
+    {
+        $configuredPid = (int) ($website['pid'] ?? 0);
+        $package = $this->content->package();
+        $titles = array_values(array_filter(array_unique([
+            (string) ($package['title'] ?? ''),
+            'Bespoke Website Development',
+            'Complete Website in Just £200',
+        ])));
+
+        foreach ($titles as $title) {
+            $matchedPid = $this->matchedWhmcsProductPid($title);
+            if ($matchedPid > 0) {
+                return [
+                    'pid' => $matchedPid,
+                    'configured_pid' => $configuredPid,
+                    'source' => $matchedPid === $configuredPid ? 'configured_confirmed_by_name' : 'whmcs_product_name_match',
+                ];
+            }
+        }
+
+        return [
+            'pid' => $configuredPid,
+            'configured_pid' => $configuredPid,
+            'source' => 'configured',
+        ];
+    }
+
     private function normaliseProductTitle(string $title): string
     {
         $title = strtolower(trim($title));
@@ -1510,14 +1564,22 @@ final class SiteController extends Controller
 
         if (in_array($data['order_type'], ['hosting', 'bundle'], true)) {
             $plan = $this->checkoutPlanBySlug($data['hosting_plan']);
-            $pid = (int) ($plan['checkout_pid'] ?? 0);
+            if (!$plan) {
+                return ['ok' => false, 'message' => 'Choose a valid hosting package.'];
+            }
+
+            $resolvedPid = $this->resolveCheckoutPlanPid($plan);
+            $pid = (int) ($resolvedPid['pid'] ?? 0);
             if ($pid <= 0) {
                 return ['ok' => false, 'message' => 'This hosting package is not ready for checkout yet.'];
             }
 
             $payload['pid'] = [$pid];
+            $payload['qty'] = [1];
             $payload['billingcycle'] = [$data['billing_cycle'] ?: ($plan['checkout_billing_cycle'] ?? 'monthly')];
-            $payload['priceoverride'] = [number_format($this->planPriceAmount($plan, (string) ($payload['billingcycle'][0] ?? 'monthly')), 2, '.', '')];
+            $priceOverride = number_format($this->planPriceAmount($plan, (string) ($payload['billingcycle'][0] ?? 'monthly')), 2, '.', '');
+            $payload['priceoverride'] = [$priceOverride];
+            $payload['noinvoice'] = '0';
 
             if ($data['order_type'] === 'bundle') {
                 $payload['domain'] = [$domain];
@@ -1534,19 +1596,25 @@ final class SiteController extends Controller
                     'kind' => $data['order_type'],
                     'plan' => (string) ($plan['slug'] ?? ''),
                     'pid' => $pid,
+                    'configured_pid' => (int) ($resolvedPid['configured_pid'] ?? 0),
+                    'pid_source' => (string) ($resolvedPid['source'] ?? ''),
                     'billing_cycle' => (string) ($payload['billingcycle'][0] ?? ''),
+                    'priceoverride' => $priceOverride,
                     'registration_period' => $registrationPeriod,
                 ],
             ];
         }
 
         $website = $config['website_package'] ?? [];
-        $pid = (int) ($website['pid'] ?? 0);
+        $resolvedPid = $this->resolveWebsitePackagePid($website);
+        $pid = (int) ($resolvedPid['pid'] ?? 0);
         if ($pid <= 0) {
             return ['ok' => false, 'message' => 'The website package is not ready for checkout yet.'];
         }
 
         $payload['pid'] = [$pid];
+        $payload['qty'] = [1];
+        $payload['noinvoice'] = '0';
         $cycle = (string) ($website['billing_cycle'] ?? '');
         if ($cycle !== '') {
             $payload['billingcycle'] = [$cycle];
@@ -1564,7 +1632,7 @@ final class SiteController extends Controller
         }
 
         if (array_key_exists('price_override', $website) && (string) $website['price_override'] !== '') {
-            $payload['priceoverride'] = [(string) $website['price_override']];
+            $payload['priceoverride'] = [number_format($this->moneyToFloat((string) $website['price_override']), 2, '.', '')];
         }
 
         return [
@@ -1573,7 +1641,10 @@ final class SiteController extends Controller
             'debug' => [
                 'kind' => 'website',
                 'pid' => $pid,
+                'configured_pid' => (int) ($resolvedPid['configured_pid'] ?? 0),
+                'pid_source' => (string) ($resolvedPid['source'] ?? ''),
                 'billing_cycle' => (string) ($payload['billingcycle'][0] ?? 'onetime'),
+                'priceoverride' => (string) ($payload['priceoverride'][0] ?? ''),
                 'registration_period' => $registrationPeriod,
             ],
         ];
