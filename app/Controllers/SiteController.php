@@ -854,7 +854,27 @@ final class SiteController extends Controller
 
     private function checkoutInvoiceMatchAmount(array $data, float $expectedAmount): float
     {
-        return ($data['order_type'] ?? '') === 'domain' ? 0.0 : $expectedAmount;
+        $type = (string) ($data['order_type'] ?? '');
+        if ($type === 'domain') {
+            return 0.0;
+        }
+
+        if ($type !== 'bundle') {
+            return $expectedAmount;
+        }
+
+        $plan = $this->checkoutPlanBySlug((string) ($data['hosting_plan'] ?? ''));
+        if (!$plan) {
+            return $expectedAmount;
+        }
+
+        $domainAmount = $this->liveDomainPriceAmount((string) ($data['domain'] ?? ''));
+        if ($domainAmount <= 0) {
+            $domainAmount = $this->domainPriceAmount((string) ($data['domain'] ?? ''));
+        }
+
+        $hostingAmount = $this->planPriceAmount($plan, (string) ($data['billing_cycle'] ?? 'monthly'));
+        return round($domainAmount + $hostingAmount, 2);
     }
 
     private function checkoutInvoiceMatchingExpectedAmount(array $invoice, int $invoiceId, int $orderId, int $clientId, float $expectedAmount, array $data): array
@@ -1239,6 +1259,22 @@ final class SiteController extends Controller
         return $this->moneyToFloat($this->configuredDomainPrice($parsed['tld']) ?? '0.00');
     }
 
+    private function liveDomainPriceAmount(string $domain): float
+    {
+        $parsed = $this->splitDomain($domain);
+        if (!$parsed) {
+            return 0.0;
+        }
+
+        $config = $this->whmcs->checkoutConfig();
+        $pricing = $this->whmcs->tldPricing((int) ($config['currency_id'] ?? 1));
+        if (!$pricing['ok']) {
+            return 0.0;
+        }
+
+        return $this->moneyToFloat($this->whmcs->priceForTld((array) ($pricing['pricing'] ?? []), $parsed['tld']) ?? '0.00');
+    }
+
     private function planPriceAmount(array $plan, string $billingCycle): float
     {
         $billingCycle = $this->normaliseBillingCycle($billingCycle) ?: 'monthly';
@@ -1481,6 +1517,7 @@ final class SiteController extends Controller
 
             $payload['pid'] = [$pid];
             $payload['billingcycle'] = [$data['billing_cycle'] ?: ($plan['checkout_billing_cycle'] ?? 'monthly')];
+            $payload['priceoverride'] = [number_format($this->planPriceAmount($plan, (string) ($payload['billingcycle'][0] ?? 'monthly')), 2, '.', '')];
 
             if ($data['order_type'] === 'bundle') {
                 $payload['domain'] = [$domain];
@@ -1511,7 +1548,7 @@ final class SiteController extends Controller
 
         $payload['pid'] = [$pid];
         $cycle = (string) ($website['billing_cycle'] ?? '');
-        if ($cycle !== '' && $cycle !== 'onetime') {
+        if ($cycle !== '') {
             $payload['billingcycle'] = [$cycle];
         }
 

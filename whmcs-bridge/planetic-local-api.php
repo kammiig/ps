@@ -11,7 +11,7 @@ declare(strict_types=1);
  * WHMCS_LOCAL_API_BRIDGE_TOKEN=change_this_long_random_token
  */
 
-define('PLANETIC_BRIDGE_VERSION', '2026-06-03-invoice-amount-match-v3');
+define('PLANETIC_BRIDGE_VERSION', '2026-06-03-package-priceoverride-v4');
 
 $bridgeToken = 'change_this_long_random_token';
 $adminUsername = '';
