@@ -11,7 +11,7 @@ declare(strict_types=1);
  * WHMCS_LOCAL_API_BRIDGE_TOKEN=change_this_long_random_token
  */
 
-define('PLANETIC_BRIDGE_VERSION', '2026-06-03-product-payload-v5');
+define('PLANETIC_BRIDGE_VERSION', '2026-06-03-invoice-repair-v6');
 
 $bridgeToken = 'change_this_long_random_token';
 $adminUsername = '';
@@ -40,6 +40,8 @@ $allowedActions = [
     'GetClientsDetails',
     'AddClient',
     'AddOrder',
+    'CreateInvoice',
+    'UpdateInvoice',
     'AddInvoicePayment',
     'AcceptOrder',
     'CreateSsoToken',

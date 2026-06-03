@@ -262,6 +262,68 @@ final class WhmcsService
         ];
     }
 
+    public function createCheckoutInvoice(int $clientId, int $orderId, float $amount, string $description): array
+    {
+        if ($clientId <= 0 || $amount <= 0) {
+            return ['ok' => false, 'message' => 'A client and payable amount are required to create an invoice.'];
+        }
+
+        $date = date('Y-m-d');
+        $decoded = $this->callApi([
+            'action' => 'CreateInvoice',
+            'userid' => $clientId,
+            'status' => 'Unpaid',
+            'sendinvoice' => '0',
+            'paymentmethod' => $this->paymentMethod(),
+            'date' => $date,
+            'duedate' => $date,
+            'notes' => $orderId > 0 ? 'Planetic Solutions checkout order #' . $orderId : 'Planetic Solutions checkout',
+            'itemdescription1' => $description,
+            'itemamount1' => number_format($amount, 2, '.', ''),
+            'itemtaxed1' => '0',
+            'autoapplycredit' => '0',
+            'responsetype' => 'json',
+        ]);
+
+        if (($decoded['result'] ?? '') !== 'success') {
+            return ['ok' => false, 'message' => $decoded['message'] ?? 'Unable to create checkout invoice.', 'raw' => $decoded];
+        }
+
+        return [
+            'ok' => true,
+            'invoice_id' => $this->firstApiInt($decoded, ['invoiceid', 'invoice_id', 'id']),
+            'raw' => $decoded,
+        ];
+    }
+
+    public function addInvoiceLineItem(int $invoiceId, string $description, float $amount): array
+    {
+        if ($invoiceId <= 0 || $amount <= 0) {
+            return ['ok' => false, 'message' => 'An invoice and payable amount are required to update an invoice.'];
+        }
+
+        $decoded = $this->callApi([
+            'action' => 'UpdateInvoice',
+            'invoiceid' => $invoiceId,
+            'status' => 'Unpaid',
+            'paymentmethod' => $this->paymentMethod(),
+            'newitemdescription' => [$description],
+            'newitemamount' => [number_format($amount, 2, '.', '')],
+            'newitemtaxed' => ['0'],
+            'responsetype' => 'json',
+        ]);
+
+        if (($decoded['result'] ?? '') !== 'success') {
+            return ['ok' => false, 'message' => $decoded['message'] ?? 'Unable to update checkout invoice.', 'raw' => $decoded];
+        }
+
+        return [
+            'ok' => true,
+            'invoice_id' => $this->firstApiInt($decoded, ['invoiceid', 'invoice_id', 'id']) ?: $invoiceId,
+            'raw' => $decoded,
+        ];
+    }
+
     public function invoice(int $invoiceId): array
     {
         $decoded = $this->callApi([
@@ -920,7 +982,7 @@ final class WhmcsService
 
     private function canRetryApiAction(string $action): bool
     {
-        return in_array($action, ['DomainWhois', 'GetTLDPricing', 'GetProducts', 'GetClientsDetails', 'GetInvoice', 'GetInvoices', 'GetOrders', 'PlaneticGetInvoice', 'PlaneticGetOrderInvoice', 'GetClientsProducts', 'GetClientsDomains', 'DomainGetNameservers'], true);
+        return in_array($action, ['DomainWhois', 'GetTLDPricing', 'GetProducts', 'GetClientsDetails', 'CreateInvoice', 'UpdateInvoice', 'GetInvoice', 'GetInvoices', 'GetOrders', 'PlaneticGetInvoice', 'PlaneticGetOrderInvoice', 'GetClientsProducts', 'GetClientsDomains', 'DomainGetNameservers'], true);
     }
 
     private function firstApiInt(array $payload, array $keys): int

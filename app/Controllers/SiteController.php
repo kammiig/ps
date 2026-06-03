@@ -892,8 +892,22 @@ final class SiteController extends Controller
 
         $status = strtolower((string) ($invoice['status'] ?? ''));
         $amount = $this->invoiceAmountDue($invoice);
-        if ($status !== 'paid' && ($amount <= 0 || $this->moneyAmountsMatch($amount, $expectedAmount))) {
+        if ($status !== 'paid' && $this->moneyAmountsMatch($amount, $expectedAmount)) {
             return ['ok' => true, 'invoice' => $invoice];
+        }
+
+        if ($status !== 'paid' && $invoiceId > 0 && $amount < $expectedAmount) {
+            $repaired = $this->repairCheckoutInvoiceAmount($invoiceId, $orderId, $clientId, $amount, $expectedAmount, $data);
+            if ($repaired['ok']) {
+                return $repaired;
+            }
+        }
+
+        if ($status === 'paid' || $amount <= 0) {
+            $replacement = $this->createCheckoutInvoiceForExpectedAmount($orderId, $clientId, $data, $expectedAmount, 'non-payable or paid invoice');
+            if ($replacement['ok']) {
+                return $replacement;
+            }
         }
 
         $this->writeCheckoutLog('Checkout invoice did not match selected package amount.', [
@@ -948,6 +962,190 @@ final class SiteController extends Controller
         ];
     }
 
+    private function repairCheckoutInvoiceAmount(int $invoiceId, int $orderId, int $clientId, float $currentAmount, float $expectedAmount, array $data): array
+    {
+        $missingAmount = round($expectedAmount - max(0.0, $currentAmount), 2);
+        if ($invoiceId <= 0 || $clientId <= 0 || $missingAmount <= 0) {
+            return ['ok' => false, 'message' => 'The invoice could not be repaired.'];
+        }
+
+        $description = $this->checkoutInvoiceAdjustmentDescription($data);
+        $updated = $this->whmcs->addInvoiceLineItem($invoiceId, $description, $missingAmount);
+        if (!$updated['ok']) {
+            $this->writeCheckoutLog('Unable to add missing checkout item to WHMCS invoice.', [
+                'invoice_id' => $invoiceId,
+                'order_id' => $orderId,
+                'client_id' => $clientId,
+                'order_type' => $data['order_type'] ?? '',
+                'current_amount' => number_format($currentAmount, 2, '.', ''),
+                'expected_amount' => number_format($expectedAmount, 2, '.', ''),
+                'missing_amount' => number_format($missingAmount, 2, '.', ''),
+                'message' => $updated['message'] ?? '',
+            ]);
+
+            return ['ok' => false, 'message' => $updated['message'] ?? 'The invoice could not be repaired.'];
+        }
+
+        usleep(250000);
+        $invoice = $this->whmcs->invoiceForClient($invoiceId, $clientId, $orderId);
+        if (!$invoice['ok']) {
+            $this->writeCheckoutLog('WHMCS invoice could not be reloaded after adding checkout item.', [
+                'invoice_id' => $invoiceId,
+                'order_id' => $orderId,
+                'client_id' => $clientId,
+                'message' => $invoice['message'] ?? '',
+            ]);
+
+            return ['ok' => false, 'message' => $invoice['message'] ?? 'The invoice could not be reloaded.'];
+        }
+
+        $invoiceData = (array) ($invoice['invoice'] ?? []);
+        $amount = $this->invoiceAmountDue($invoiceData);
+        if (!$this->moneyAmountsMatch($amount, $expectedAmount)) {
+            $this->writeCheckoutLog('WHMCS invoice still did not match after checkout item repair.', [
+                'invoice_id' => $invoiceId,
+                'order_id' => $orderId,
+                'client_id' => $clientId,
+                'invoice_amount' => number_format($amount, 2, '.', ''),
+                'expected_amount' => number_format($expectedAmount, 2, '.', ''),
+            ]);
+
+            return ['ok' => false, 'message' => 'The invoice amount still does not match the selected package.'];
+        }
+
+        $this->writeCheckoutLog('Added missing checkout item to WHMCS invoice.', [
+            'invoice_id' => $invoiceId,
+            'order_id' => $orderId,
+            'client_id' => $clientId,
+            'order_type' => $data['order_type'] ?? '',
+            'missing_amount' => number_format($missingAmount, 2, '.', ''),
+            'final_amount' => number_format($amount, 2, '.', ''),
+        ]);
+
+        return ['ok' => true, 'invoice' => $invoiceData];
+    }
+
+    private function createCheckoutInvoiceForExpectedAmount(int $orderId, int $clientId, array $data, float $expectedAmount, string $reason): array
+    {
+        if ($clientId <= 0 || $expectedAmount <= 0) {
+            return ['ok' => false, 'message' => 'The checkout invoice could not be created.'];
+        }
+
+        $created = $this->whmcs->createCheckoutInvoice(
+            $clientId,
+            $orderId,
+            $expectedAmount,
+            $this->checkoutInvoiceDescription($data)
+        );
+
+        if (!$created['ok']) {
+            $this->writeCheckoutLog('Unable to create WHMCS checkout invoice.', [
+                'order_id' => $orderId,
+                'client_id' => $clientId,
+                'order_type' => $data['order_type'] ?? '',
+                'amount' => number_format($expectedAmount, 2, '.', ''),
+                'reason' => $reason,
+                'message' => $created['message'] ?? '',
+            ]);
+
+            return ['ok' => false, 'message' => $created['message'] ?? 'The checkout invoice could not be created.'];
+        }
+
+        $invoiceId = (int) ($created['invoice_id'] ?? 0);
+        if ($invoiceId <= 0) {
+            $this->writeCheckoutLog('WHMCS checkout invoice was created without an invoice ID.', [
+                'order_id' => $orderId,
+                'client_id' => $clientId,
+                'order_type' => $data['order_type'] ?? '',
+                'amount' => number_format($expectedAmount, 2, '.', ''),
+                'reason' => $reason,
+                'response_keys' => array_keys((array) ($created['raw'] ?? [])),
+            ]);
+
+            return ['ok' => false, 'message' => 'The checkout invoice could not be created.'];
+        }
+
+        usleep(250000);
+        $invoice = $this->whmcs->invoiceForClient($invoiceId, $clientId, $orderId);
+        if (!$invoice['ok']) {
+            $this->writeCheckoutLog('Created WHMCS checkout invoice could not be loaded.', [
+                'invoice_id' => $invoiceId,
+                'order_id' => $orderId,
+                'client_id' => $clientId,
+                'order_type' => $data['order_type'] ?? '',
+                'amount' => number_format($expectedAmount, 2, '.', ''),
+                'reason' => $reason,
+                'message' => $invoice['message'] ?? '',
+            ]);
+
+            return ['ok' => false, 'message' => $invoice['message'] ?? 'The checkout invoice could not be loaded.'];
+        }
+
+        $invoiceData = (array) ($invoice['invoice'] ?? []);
+        $amount = $this->invoiceAmountDue($invoiceData);
+        if (!$this->moneyAmountsMatch($amount, $expectedAmount)) {
+            $this->writeCheckoutLog('Created WHMCS checkout invoice amount did not match selected package.', [
+                'invoice_id' => $invoiceId,
+                'order_id' => $orderId,
+                'client_id' => $clientId,
+                'invoice_amount' => number_format($amount, 2, '.', ''),
+                'expected_amount' => number_format($expectedAmount, 2, '.', ''),
+                'reason' => $reason,
+            ]);
+
+            return ['ok' => false, 'message' => 'The checkout invoice amount did not match the selected package.'];
+        }
+
+        $this->writeCheckoutLog('Created WHMCS checkout invoice for selected package amount.', [
+            'invoice_id' => $invoiceId,
+            'order_id' => $orderId,
+            'client_id' => $clientId,
+            'order_type' => $data['order_type'] ?? '',
+            'amount' => number_format($amount, 2, '.', ''),
+            'reason' => $reason,
+        ]);
+
+        return ['ok' => true, 'invoice' => $invoiceData];
+    }
+
+    private function checkoutInvoiceDescription(array $data): string
+    {
+        $type = (string) ($data['order_type'] ?? '');
+        $domain = trim((string) ($data['domain'] ?? ''));
+
+        if ($type === 'website') {
+            return $domain !== ''
+                ? 'Bespoke Website Development package for ' . $domain
+                : 'Bespoke Website Development package';
+        }
+
+        $plan = $this->checkoutPlanBySlug((string) ($data['hosting_plan'] ?? ''));
+        $planName = (string) ($plan['title'] ?? 'Hosting package');
+        $cycle = $this->normaliseBillingCycle((string) ($data['billing_cycle'] ?? 'monthly')) === 'annually' ? 'yearly' : 'monthly';
+
+        if ($type === 'bundle') {
+            return trim(($domain !== '' ? $domain . ' domain registration and ' : '') . $planName . ' hosting (' . $cycle . ')');
+        }
+
+        if ($type === 'hosting') {
+            return trim($planName . ' hosting (' . $cycle . ')' . ($domain !== '' ? ' for ' . $domain : ''));
+        }
+
+        return $domain !== '' ? 'Domain registration for ' . $domain : 'Planetic Solutions checkout';
+    }
+
+    private function checkoutInvoiceAdjustmentDescription(array $data): string
+    {
+        $type = (string) ($data['order_type'] ?? '');
+        if ($type === 'website') {
+            return $this->checkoutInvoiceDescription($data);
+        }
+
+        $plan = $this->checkoutPlanBySlug((string) ($data['hosting_plan'] ?? ''));
+        $planName = (string) ($plan['title'] ?? 'Hosting package');
+        return $planName . ' checkout item';
+    }
+
     private function moneyAmountsMatch(float $first, float $second): bool
     {
         return abs(round($first, 2) - round($second, 2)) <= 0.01;
@@ -956,7 +1154,7 @@ final class SiteController extends Controller
     private function fallbackInvoiceForCheckout(int $invoiceId, int $orderId, int $clientId, array $data, string $message = ''): array
     {
         $expectedAmount = $this->expectedCheckoutAmount($data);
-        if ($invoiceId <= 0 || $clientId <= 0 || $expectedAmount <= 0) {
+        if ($clientId <= 0 || $expectedAmount <= 0) {
             $this->writeCheckoutLog('Unable to build checkout invoice fallback.', [
                 'invoice_id' => $invoiceId,
                 'order_id' => $orderId,
@@ -967,6 +1165,10 @@ final class SiteController extends Controller
             ]);
 
             return ['ok' => false, 'message' => $message ?: 'Unable to load invoice amount.'];
+        }
+
+        if ($invoiceId <= 0) {
+            return $this->createCheckoutInvoiceForExpectedAmount($orderId, $clientId, $data, $expectedAmount, $message ?: 'order returned without invoice');
         }
 
         $this->writeCheckoutLog('Using configured checkout amount because WHMCS invoice lookup failed.', [
@@ -1579,7 +1781,6 @@ final class SiteController extends Controller
             $payload['billingcycle'] = [$data['billing_cycle'] ?: ($plan['checkout_billing_cycle'] ?? 'monthly')];
             $priceOverride = number_format($this->planPriceAmount($plan, (string) ($payload['billingcycle'][0] ?? 'monthly')), 2, '.', '');
             $payload['priceoverride'] = [$priceOverride];
-            $payload['noinvoice'] = '0';
 
             if ($data['order_type'] === 'bundle') {
                 $payload['domain'] = [$domain];
@@ -1614,7 +1815,6 @@ final class SiteController extends Controller
 
         $payload['pid'] = [$pid];
         $payload['qty'] = [1];
-        $payload['noinvoice'] = '0';
         $cycle = (string) ($website['billing_cycle'] ?? '');
         if ($cycle !== '') {
             $payload['billingcycle'] = [$cycle];

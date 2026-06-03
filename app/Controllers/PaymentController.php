@@ -325,6 +325,19 @@ final class PaymentController extends Controller
             return 'Invoice payment could not be recorded.';
         }
 
+        if ((int) ($order['whmcs_order_id'] ?? 0) > 0) {
+            $accepted = $this->whmcs->acceptOrder((int) $order['whmcs_order_id']);
+            if (!$accepted['ok']) {
+                $this->logPaymentIssue('WHMCS order could not be accepted automatically after payment.', [
+                    'order_id' => (int) $order['id'],
+                    'payment_intent_id' => (string) ($intent['id'] ?? ''),
+                    'whmcs_order_id' => (int) $order['whmcs_order_id'],
+                    'invoice_id' => (int) $order['whmcs_invoice_id'],
+                    'message' => $accepted['message'] ?? 'Unable to accept WHMCS order.',
+                ]);
+            }
+        }
+
         $this->payments->markPaid((int) $order['id'], (string) $intent['id']);
         $this->payments->markWebhookEvent($eventId, 'processed', (int) $order['id']);
         return json_encode(['received' => true]);
