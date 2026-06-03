@@ -131,6 +131,20 @@ final class StripeService
         return ['ok' => true, 'event' => $event];
     }
 
+    public function paymentIntent(string $paymentIntentId): array
+    {
+        if (!$this->configured()) {
+            return ['ok' => false, 'message' => 'Stripe payment is not configured yet.'];
+        }
+
+        $paymentIntentId = trim($paymentIntentId);
+        if ($paymentIntentId === '' || !preg_match('/^pi_[A-Za-z0-9_]+$/', $paymentIntentId)) {
+            return ['ok' => false, 'message' => 'Stripe payment reference was invalid.'];
+        }
+
+        return $this->api('GET', '/v1/payment_intents/' . rawurlencode($paymentIntentId));
+    }
+
     public function amountToMinorUnits(float $amount, string $currency): int
     {
         $zeroDecimal = ['bif', 'clp', 'djf', 'gnf', 'jpy', 'kmf', 'krw', 'mga', 'pyg', 'rwf', 'ugx', 'vnd', 'vuv', 'xaf', 'xof', 'xpf'];

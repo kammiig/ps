@@ -47,6 +47,11 @@ final class PaymentController extends Controller
             $this->redirect(url('/checkout/success?order=' . rawurlencode($token)));
         }
 
+        $order = $this->syncOrderFromStripe($order);
+        if ($order['payment_status'] === 'paid') {
+            $this->redirect(url('/checkout/success?order=' . rawurlencode($token)));
+        }
+
         $refreshed = $this->refreshInvoiceAmount($order);
         if (!$refreshed['ok']) {
             return $this->render('site/payment-failed', $this->baseData('checkout', [
@@ -93,6 +98,8 @@ final class PaymentController extends Controller
             return $this->notFound();
         }
 
+        $order = $this->syncOrderFromStripe($order);
+
         return $this->render('site/payment-success', $this->baseData('checkout', [
             'order' => $order,
             'amountLabel' => $this->money((float) $order['invoice_amount'], (string) $order['currency']),
@@ -124,6 +131,7 @@ final class PaymentController extends Controller
             return json_encode(['ok' => false, 'message' => 'Payment was not found.'], JSON_UNESCAPED_SLASHES);
         }
 
+        $order = $this->syncOrderFromStripe($order);
         $status = strtolower((string) ($order['payment_status'] ?? 'pending'));
         $labels = [
             'pending' => 'Pending Payment',
@@ -246,27 +254,86 @@ final class PaymentController extends Controller
 
     private function handleSucceededWebhook(string $eventId, array $intent, ?array $order): string
     {
+        $result = $this->processSucceededPaymentIntent($intent, $order, 'stripe_webhook:' . $eventId);
+        if (!$result['ok']) {
+            $this->payments->markWebhookEvent($eventId, 'failed', $order ? (int) $order['id'] : null);
+            http_response_code((int) ($result['http_status'] ?? 400));
+            return (string) ($result['response'] ?? 'Payment could not be processed.');
+        }
+
+        $this->payments->markWebhookEvent($eventId, 'processed', (int) $result['order_id']);
+        return json_encode(['received' => true]);
+    }
+
+    private function syncOrderFromStripe(array $order): array
+    {
+        if (($order['payment_status'] ?? '') === 'paid') {
+            return $order;
+        }
+
+        $paymentIntentId = (string) ($order['stripe_payment_intent_id'] ?? '');
+        if ($paymentIntentId === '') {
+            return $order;
+        }
+
+        $intent = $this->stripe->paymentIntent($paymentIntentId);
+        if (!($intent['ok'] ?? false) || !isset($intent['data']) || !is_array($intent['data'])) {
+            return $this->payments->find((int) $order['id']) ?? $order;
+        }
+
+        $intentData = $intent['data'];
+        $intentStatus = strtolower((string) ($intentData['status'] ?? ''));
+        if ($intentStatus === 'succeeded') {
+            $this->processSucceededPaymentIntent($intentData, $order, 'payment_status_reconciliation');
+            return $this->payments->find((int) $order['id']) ?? $order;
+        }
+
+        if ($intentStatus === 'requires_payment_method') {
+            $message = (string) ($intentData['last_payment_error']['message'] ?? 'Payment was not completed.');
+            $this->payments->markFailedByPaymentIntent($paymentIntentId, $message);
+            return $this->payments->find((int) $order['id']) ?? $order;
+        }
+
+        return $order;
+    }
+
+    private function processSucceededPaymentIntent(array $intent, ?array $order, string $source): array
+    {
         if (!$order) {
-            $this->logPaymentIssue('Stripe webhook payment order was not found.', [
-                'event_id' => $eventId,
+            $this->logPaymentIssue('Stripe payment order was not found.', [
+                'source' => $source,
                 'payment_intent_id' => (string) ($intent['id'] ?? ''),
                 'local_order_id' => (int) ($intent['metadata']['local_order_id'] ?? 0),
             ]);
-            $this->payments->markWebhookEvent($eventId, 'failed');
-            http_response_code(400);
-            return 'Payment order was not found.';
+            return ['ok' => false, 'http_status' => 400, 'response' => 'Payment order was not found.'];
         }
 
         if ($order['payment_status'] === 'paid') {
-            $this->payments->markWebhookEvent($eventId, 'processed', (int) $order['id']);
-            return json_encode(['received' => true]);
+            return ['ok' => true, 'order_id' => (int) $order['id']];
+        }
+
+        $intentStatus = strtolower((string) ($intent['status'] ?? ''));
+        if ($intentStatus !== 'succeeded') {
+            return ['ok' => false, 'http_status' => 202, 'response' => 'Payment is not complete yet.'];
+        }
+
+        $metadataOrderId = (int) ($intent['metadata']['local_order_id'] ?? 0);
+        if ($metadataOrderId > 0 && $metadataOrderId !== (int) $order['id']) {
+            $this->logPaymentIssue('Stripe payment metadata did not match the local order.', [
+                'source' => $source,
+                'order_id' => (int) $order['id'],
+                'metadata_order_id' => $metadataOrderId,
+                'payment_intent_id' => (string) ($intent['id'] ?? ''),
+            ]);
+            return ['ok' => false, 'http_status' => 400, 'response' => 'Payment metadata mismatch.'];
         }
 
         $paidAmount = $this->stripe->minorUnitsToAmount((int) ($intent['amount_received'] ?? 0), (string) ($intent['currency'] ?? $order['currency']));
         $paidCurrency = strtoupper((string) ($intent['currency'] ?? ''));
         $expectedCurrency = strtoupper((string) $order['currency']);
         if (abs($paidAmount - (float) $order['invoice_amount']) > 0.01 || $paidCurrency !== $expectedCurrency) {
-            $this->logPaymentIssue('Stripe webhook amount mismatch.', [
+            $this->logPaymentIssue('Stripe payment amount mismatch.', [
+                'source' => $source,
                 'order_id' => (int) $order['id'],
                 'payment_intent_id' => (string) ($intent['id'] ?? ''),
                 'paid_amount' => $paidAmount,
@@ -275,34 +342,28 @@ final class PaymentController extends Controller
                 'expected_currency' => $expectedCurrency,
             ]);
             $this->payments->markPendingWithError((int) $order['id'], 'Stripe paid amount did not match the saved invoice amount.');
-            $this->payments->markWebhookEvent($eventId, 'failed', (int) $order['id']);
-            http_response_code(400);
-            return 'Amount mismatch.';
+            return ['ok' => false, 'http_status' => 400, 'response' => 'Amount mismatch.'];
         }
 
         $gateway = $this->whmcs->invoicePaymentGateway();
         if ($gateway === '') {
-            $this->logPaymentIssue('WHMCS payment gateway name is not configured for Stripe webhook.', [
+            $this->logPaymentIssue('WHMCS payment gateway name is not configured for Stripe payment recording.', [
+                'source' => $source,
                 'order_id' => (int) $order['id'],
                 'payment_intent_id' => (string) ($intent['id'] ?? ''),
                 'invoice_id' => (int) $order['whmcs_invoice_id'],
             ]);
             $this->payments->markPendingWithError((int) $order['id'], 'WHMCS payment gateway name is not configured.');
-            $this->payments->markWebhookEvent($eventId, 'failed', (int) $order['id']);
-            http_response_code(500);
-            return 'Gateway not configured.';
+            return ['ok' => false, 'http_status' => 500, 'response' => 'Gateway not configured.'];
         }
 
         if (!$this->payments->markProcessing((int) $order['id'])) {
             $latestOrder = $this->payments->find((int) $order['id']) ?? $order;
             if (($latestOrder['payment_status'] ?? '') === 'paid') {
-                $this->payments->markWebhookEvent($eventId, 'processed', (int) $order['id']);
-                return json_encode(['received' => true]);
+                return ['ok' => true, 'order_id' => (int) $order['id']];
             }
 
-            $this->payments->markWebhookEvent($eventId, 'failed', (int) $order['id']);
-            http_response_code(409);
-            return 'Payment is already being processed.';
+            return ['ok' => false, 'http_status' => 409, 'response' => 'Payment is already being processed.'];
         }
 
         $recorded = $this->whmcs->addInvoicePayment(
@@ -313,22 +374,36 @@ final class PaymentController extends Controller
         );
 
         if (!$recorded['ok']) {
+            if ($this->invoiceIsPaidInWhmcs($order)) {
+                $this->acceptWhmcsOrderAfterPayment($order, $intent, $source);
+                $this->payments->markPaid((int) $order['id'], (string) $intent['id']);
+                return ['ok' => true, 'order_id' => (int) $order['id']];
+            }
+
             $this->logPaymentIssue('Stripe payment could not be recorded against WHMCS invoice.', [
+                'source' => $source,
                 'order_id' => (int) $order['id'],
                 'payment_intent_id' => (string) ($intent['id'] ?? ''),
                 'invoice_id' => (int) $order['whmcs_invoice_id'],
                 'message' => $recorded['message'] ?? 'Unable to record invoice payment.',
             ]);
             $this->payments->markPendingWithError((int) $order['id'], 'Payment reached Stripe but could not be recorded on the invoice yet.');
-            $this->payments->markWebhookEvent($eventId, 'failed', (int) $order['id']);
-            http_response_code(500);
-            return 'Invoice payment could not be recorded.';
+            return ['ok' => false, 'http_status' => 500, 'response' => 'Invoice payment could not be recorded.'];
         }
 
+        $this->acceptWhmcsOrderAfterPayment($order, $intent, $source);
+        $this->payments->markPaid((int) $order['id'], (string) $intent['id']);
+
+        return ['ok' => true, 'order_id' => (int) $order['id']];
+    }
+
+    private function acceptWhmcsOrderAfterPayment(array $order, array $intent, string $source): void
+    {
         if ((int) ($order['whmcs_order_id'] ?? 0) > 0) {
             $accepted = $this->whmcs->acceptOrder((int) $order['whmcs_order_id']);
             if (!$accepted['ok']) {
                 $this->logPaymentIssue('WHMCS order could not be accepted automatically after payment.', [
+                    'source' => $source,
                     'order_id' => (int) $order['id'],
                     'payment_intent_id' => (string) ($intent['id'] ?? ''),
                     'whmcs_order_id' => (int) $order['whmcs_order_id'],
@@ -337,10 +412,21 @@ final class PaymentController extends Controller
                 ]);
             }
         }
+    }
 
-        $this->payments->markPaid((int) $order['id'], (string) $intent['id']);
-        $this->payments->markWebhookEvent($eventId, 'processed', (int) $order['id']);
-        return json_encode(['received' => true]);
+    private function invoiceIsPaidInWhmcs(array $order): bool
+    {
+        $invoice = $this->whmcs->invoiceForClient(
+            (int) $order['whmcs_invoice_id'],
+            (int) $order['whmcs_client_id'],
+            (int) ($order['whmcs_order_id'] ?? 0)
+        );
+
+        if (!($invoice['ok'] ?? false) || !isset($invoice['invoice']) || !is_array($invoice['invoice'])) {
+            return false;
+        }
+
+        return strtolower((string) ($invoice['invoice']['status'] ?? '')) === 'paid';
     }
 
     private function paymentOrderForIntent(array $intent): ?array
