@@ -612,6 +612,31 @@ final class WhmcsService
         ];
     }
 
+    public function servicesForOrder(int $orderId, int $clientId): array
+    {
+        if ($orderId <= 0 || $clientId <= 0) {
+            return ['ok' => false, 'message' => 'Order and client references are required.'];
+        }
+
+        $products = $this->productsForClient($clientId);
+        if (!$products['ok']) {
+            return $products;
+        }
+
+        $matched = [];
+        foreach ($products['products'] as $product) {
+            $candidateOrderId = (int) ($product['orderid'] ?? $product['order_id'] ?? $product['order'] ?? 0);
+            if ($candidateOrderId === $orderId) {
+                $matched[] = $product;
+            }
+        }
+
+        return [
+            'ok' => true,
+            'products' => $matched,
+        ];
+    }
+
     public function domainsForClient(int $clientId): array
     {
         $decoded = $this->callApi([
@@ -724,6 +749,29 @@ final class WhmcsService
         }
 
         return ['ok' => true];
+    }
+
+    public function moduleCreate(int $serviceId): array
+    {
+        if ($serviceId <= 0) {
+            return ['ok' => false, 'message' => 'A valid hosting service reference is required.'];
+        }
+
+        $decoded = $this->callApi([
+            'action' => 'ModuleCreate',
+            'serviceid' => $serviceId,
+            'responsetype' => 'json',
+        ]);
+
+        if (($decoded['result'] ?? '') !== 'success') {
+            return [
+                'ok' => false,
+                'message' => $decoded['message'] ?? 'Unable to create hosting account.',
+                'raw' => $decoded,
+            ];
+        }
+
+        return ['ok' => true, 'raw' => $decoded];
     }
 
     public function createSsoToken(int $clientId, string $destination = 'clientarea:invoices'): array

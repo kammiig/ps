@@ -12,6 +12,7 @@ return [
     'local_bridge_url' => env('WHMCS_LOCAL_API_BRIDGE_URL', ''),
     'local_bridge_token' => env('WHMCS_LOCAL_API_BRIDGE_TOKEN', ''),
     'payment_method' => env('WHMCS_PAYMENT_METHOD', 'stripe'),
+    'use_price_override' => filter_var(env('WHMCS_USE_PRICE_OVERRIDE', false), FILTER_VALIDATE_BOOLEAN),
     'currency_id' => (int) env('WHMCS_CURRENCY_ID', 1),
     'default_billing_cycle' => env('WHMCS_DEFAULT_BILLING_CYCLE', 'monthly'),
     'nameservers' => array_values(array_filter([

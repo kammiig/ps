@@ -896,14 +896,16 @@ final class SiteController extends Controller
             return ['ok' => true, 'invoice' => $invoice];
         }
 
-        if ($status !== 'paid' && $invoiceId > 0 && $amount < $expectedAmount) {
+        $requiresRealInvoice = $this->requiresRealWhmcsInvoice($data);
+
+        if (!$requiresRealInvoice && $status !== 'paid' && $invoiceId > 0 && $amount < $expectedAmount) {
             $repaired = $this->repairCheckoutInvoiceAmount($invoiceId, $orderId, $clientId, $amount, $expectedAmount, $data);
             if ($repaired['ok']) {
                 return $repaired;
             }
         }
 
-        if ($status === 'paid' || $amount <= 0) {
+        if (!$requiresRealInvoice && ($status === 'paid' || $amount <= 0)) {
             $replacement = $this->createCheckoutInvoiceForExpectedAmount($orderId, $clientId, $data, $expectedAmount, 'non-payable or paid invoice');
             if ($replacement['ok']) {
                 return $replacement;
@@ -1029,6 +1031,22 @@ final class SiteController extends Controller
     {
         if ($clientId <= 0 || $expectedAmount <= 0) {
             return ['ok' => false, 'message' => 'The checkout invoice could not be created.'];
+        }
+
+        if ($this->requiresRealWhmcsInvoice($data)) {
+            $this->writeCheckoutLog('Refusing to create a standalone checkout invoice for a provisioning order.', [
+                'order_id' => $orderId,
+                'client_id' => $clientId,
+                'order_type' => $data['order_type'] ?? '',
+                'hosting_plan' => $data['hosting_plan'] ?? '',
+                'amount' => number_format($expectedAmount, 2, '.', ''),
+                'reason' => $reason,
+            ]);
+
+            return [
+                'ok' => false,
+                'message' => 'The selected hosting package could not be invoiced by WHMCS. Please check the WHMCS product pricing and automation settings.',
+            ];
         }
 
         $created = $this->whmcs->createCheckoutInvoice(
@@ -1165,6 +1183,20 @@ final class SiteController extends Controller
             ]);
 
             return ['ok' => false, 'message' => $message ?: 'Unable to load invoice amount.'];
+        }
+
+        if ($this->requiresRealWhmcsInvoice($data)) {
+            $this->writeCheckoutLog('Refusing configured checkout fallback for a provisioning order.', [
+                'invoice_id' => $invoiceId,
+                'order_id' => $orderId,
+                'client_id' => $clientId,
+                'order_type' => $data['order_type'] ?? '',
+                'hosting_plan' => $data['hosting_plan'] ?? '',
+                'expected_amount' => number_format($expectedAmount, 2, '.', ''),
+                'message' => $message,
+            ]);
+
+            return ['ok' => false, 'message' => $message ?: 'Unable to load the WHMCS product invoice.'];
         }
 
         if ($invoiceId <= 0) {
@@ -1779,8 +1811,11 @@ final class SiteController extends Controller
             $payload['pid'] = [$pid];
             $payload['qty'] = [1];
             $payload['billingcycle'] = [$data['billing_cycle'] ?: ($plan['checkout_billing_cycle'] ?? 'monthly')];
-            $priceOverride = number_format($this->planPriceAmount($plan, (string) ($payload['billingcycle'][0] ?? 'monthly')), 2, '.', '');
-            $payload['priceoverride'] = [$priceOverride];
+            $priceOverride = '';
+            if (!empty($config['use_price_override'])) {
+                $priceOverride = number_format($this->planPriceAmount($plan, (string) ($payload['billingcycle'][0] ?? 'monthly')), 2, '.', '');
+                $payload['priceoverride'] = [$priceOverride];
+            }
 
             if ($data['order_type'] === 'bundle') {
                 $payload['domain'] = [$domain];
@@ -1861,6 +1896,11 @@ final class SiteController extends Controller
         }
 
         return !empty($this->whmcs->checkoutConfig()['website_package']['register_domain']);
+    }
+
+    private function requiresRealWhmcsInvoice(array $data): bool
+    {
+        return in_array((string) ($data['order_type'] ?? ''), ['hosting', 'bundle'], true);
     }
 
     private function appendNameservers(array $payload): array

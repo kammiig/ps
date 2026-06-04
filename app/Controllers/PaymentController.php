@@ -43,10 +43,6 @@ final class PaymentController extends Controller
             $this->redirect(url('/account/login?next=' . rawurlencode('/checkout/payment/' . $token)));
         }
 
-        if ($order['payment_status'] === 'paid') {
-            $this->redirect(url('/checkout/success?order=' . rawurlencode($token)));
-        }
-
         $order = $this->syncOrderFromStripe($order);
         if ($order['payment_status'] === 'paid') {
             $this->redirect(url('/checkout/success?order=' . rawurlencode($token)));
@@ -268,6 +264,22 @@ final class PaymentController extends Controller
     private function syncOrderFromStripe(array $order): array
     {
         if (($order['payment_status'] ?? '') === 'paid') {
+            if ($this->invoiceIsPaidInWhmcs($order)) {
+                $this->acceptWhmcsOrderAfterPayment($order, [
+                    'id' => (string) ($order['stripe_payment_reference'] ?? $order['stripe_payment_intent_id'] ?? ''),
+                ], 'local_paid_reconciliation');
+                $this->clearAccountWhmcsCache((int) ($order['whmcs_client_id'] ?? 0));
+                return $order;
+            }
+
+            $this->payments->markPendingForReconciliation(
+                (int) $order['id'],
+                'Local payment was marked paid but WHMCS invoice is still unpaid.'
+            );
+            $order = $this->payments->find((int) $order['id']) ?? $order;
+        }
+
+        if (($order['payment_status'] ?? '') === 'paid') {
             return $order;
         }
 
@@ -309,7 +321,17 @@ final class PaymentController extends Controller
         }
 
         if ($order['payment_status'] === 'paid') {
-            return ['ok' => true, 'order_id' => (int) $order['id']];
+            if ($this->invoiceIsPaidInWhmcs($order)) {
+                $this->acceptWhmcsOrderAfterPayment($order, $intent, $source);
+                $this->clearAccountWhmcsCache((int) ($order['whmcs_client_id'] ?? 0));
+                return ['ok' => true, 'order_id' => (int) $order['id']];
+            }
+
+            $this->payments->markPendingForReconciliation(
+                (int) $order['id'],
+                'Local payment was marked paid but WHMCS invoice is still unpaid.'
+            );
+            $order = $this->payments->find((int) $order['id']) ?? $order;
         }
 
         $intentStatus = strtolower((string) ($intent['status'] ?? ''));
@@ -360,6 +382,15 @@ final class PaymentController extends Controller
         if (!$this->payments->markProcessing((int) $order['id'])) {
             $latestOrder = $this->payments->find((int) $order['id']) ?? $order;
             if (($latestOrder['payment_status'] ?? '') === 'paid') {
+                if (!$this->invoiceIsPaidInWhmcs($latestOrder)) {
+                    $this->payments->markPendingForReconciliation(
+                        (int) $latestOrder['id'],
+                        'Local payment was marked paid but WHMCS invoice is still unpaid.'
+                    );
+                    return ['ok' => false, 'http_status' => 409, 'response' => 'Payment is still being reconciled.'];
+                }
+
+                $this->clearAccountWhmcsCache((int) ($latestOrder['whmcs_client_id'] ?? 0));
                 return ['ok' => true, 'order_id' => (int) $order['id']];
             }
 
@@ -376,6 +407,7 @@ final class PaymentController extends Controller
         if (!$recorded['ok']) {
             if ($this->invoiceIsPaidInWhmcs($order)) {
                 $this->acceptWhmcsOrderAfterPayment($order, $intent, $source);
+                $this->clearAccountWhmcsCache((int) ($order['whmcs_client_id'] ?? 0));
                 $this->payments->markPaid((int) $order['id'], (string) $intent['id']);
                 return ['ok' => true, 'order_id' => (int) $order['id']];
             }
@@ -387,11 +419,24 @@ final class PaymentController extends Controller
                 'invoice_id' => (int) $order['whmcs_invoice_id'],
                 'message' => $recorded['message'] ?? 'Unable to record invoice payment.',
             ]);
-            $this->payments->markPendingWithError((int) $order['id'], 'Payment reached Stripe but could not be recorded on the invoice yet.');
+            $this->payments->markPendingForReconciliation((int) $order['id'], 'Payment reached Stripe but could not be recorded on the invoice yet.');
             return ['ok' => false, 'http_status' => 500, 'response' => 'Invoice payment could not be recorded.'];
         }
 
+        usleep(350000);
+        if (!$this->invoiceIsPaidInWhmcs($order)) {
+            $this->logPaymentIssue('WHMCS accepted the payment API call, but the invoice is not marked paid yet.', [
+                'source' => $source,
+                'order_id' => (int) $order['id'],
+                'payment_intent_id' => (string) ($intent['id'] ?? ''),
+                'invoice_id' => (int) $order['whmcs_invoice_id'],
+            ]);
+            $this->payments->markPendingForReconciliation((int) $order['id'], 'WHMCS invoice payment is still being reconciled.');
+            return ['ok' => false, 'http_status' => 202, 'response' => 'Invoice payment is still being confirmed.'];
+        }
+
         $this->acceptWhmcsOrderAfterPayment($order, $intent, $source);
+        $this->clearAccountWhmcsCache((int) ($order['whmcs_client_id'] ?? 0));
         $this->payments->markPaid((int) $order['id'], (string) $intent['id']);
 
         return ['ok' => true, 'order_id' => (int) $order['id']];
@@ -399,17 +444,118 @@ final class PaymentController extends Controller
 
     private function acceptWhmcsOrderAfterPayment(array $order, array $intent, string $source): void
     {
-        if ((int) ($order['whmcs_order_id'] ?? 0) > 0) {
-            $accepted = $this->whmcs->acceptOrder((int) $order['whmcs_order_id']);
-            if (!$accepted['ok']) {
-                $this->logPaymentIssue('WHMCS order could not be accepted automatically after payment.', [
+        $whmcsOrderId = (int) ($order['whmcs_order_id'] ?? 0);
+        if ($whmcsOrderId <= 0) {
+            return;
+        }
+
+        $accepted = $this->whmcs->acceptOrder($whmcsOrderId);
+        if (!$accepted['ok']) {
+            $this->logPaymentIssue('WHMCS order could not be accepted automatically after payment.', [
+                'source' => $source,
+                'order_id' => (int) $order['id'],
+                'payment_intent_id' => (string) ($intent['id'] ?? ''),
+                'whmcs_order_id' => $whmcsOrderId,
+                'invoice_id' => (int) $order['whmcs_invoice_id'],
+                'message' => $accepted['message'] ?? 'Unable to accept WHMCS order.',
+            ]);
+        }
+
+        $this->provisionWhmcsOrderServicesAfterPayment($order, $intent, $source);
+    }
+
+    private function provisionWhmcsOrderServicesAfterPayment(array $order, array $intent, string $source): void
+    {
+        $whmcsOrderId = (int) ($order['whmcs_order_id'] ?? 0);
+        $whmcsClientId = (int) ($order['whmcs_client_id'] ?? 0);
+        if ($whmcsOrderId <= 0 || $whmcsClientId <= 0) {
+            return;
+        }
+
+        $services = $this->whmcs->servicesForOrder($whmcsOrderId, $whmcsClientId);
+        if (!$services['ok']) {
+            $this->logPaymentIssue('WHMCS services could not be loaded for provisioning after payment.', [
+                'source' => $source,
+                'order_id' => (int) $order['id'],
+                'payment_intent_id' => (string) ($intent['id'] ?? ''),
+                'whmcs_order_id' => $whmcsOrderId,
+                'invoice_id' => (int) $order['whmcs_invoice_id'],
+                'message' => $services['message'] ?? 'Unable to load WHMCS services.',
+            ]);
+            return;
+        }
+
+        foreach (($services['products'] ?? []) as $service) {
+            if (!$this->serviceNeedsProvisioning($service)) {
+                continue;
+            }
+
+            $serviceId = $this->serviceIdFromProduct($service);
+            if ($serviceId <= 0) {
+                continue;
+            }
+
+            $created = $this->whmcs->moduleCreate($serviceId);
+            if (!$created['ok']) {
+                $this->logPaymentIssue('WHMCS hosting service could not be provisioned automatically after payment.', [
                     'source' => $source,
                     'order_id' => (int) $order['id'],
                     'payment_intent_id' => (string) ($intent['id'] ?? ''),
-                    'whmcs_order_id' => (int) $order['whmcs_order_id'],
+                    'whmcs_order_id' => $whmcsOrderId,
                     'invoice_id' => (int) $order['whmcs_invoice_id'],
-                    'message' => $accepted['message'] ?? 'Unable to accept WHMCS order.',
+                    'service_id' => $serviceId,
+                    'service_status' => (string) ($service['status'] ?? ''),
+                    'domain' => (string) ($service['domain'] ?? ''),
+                    'message' => $created['message'] ?? 'Unable to create hosting account.',
                 ]);
+                continue;
+            }
+
+            $this->logPaymentIssue('WHMCS hosting service provisioning was requested after payment.', [
+                'source' => $source,
+                'order_id' => (int) $order['id'],
+                'payment_intent_id' => (string) ($intent['id'] ?? ''),
+                'whmcs_order_id' => $whmcsOrderId,
+                'invoice_id' => (int) $order['whmcs_invoice_id'],
+                'service_id' => $serviceId,
+                'domain' => (string) ($service['domain'] ?? ''),
+            ]);
+        }
+    }
+
+    private function serviceIdFromProduct(array $service): int
+    {
+        foreach (['id', 'serviceid', 'service_id', 'hostingid', 'relid'] as $key) {
+            $id = (int) ($service[$key] ?? 0);
+            if ($id > 0) {
+                return $id;
+            }
+        }
+
+        return 0;
+    }
+
+    private function serviceNeedsProvisioning(array $service): bool
+    {
+        $status = strtolower((string) ($service['status'] ?? ''));
+        if (in_array($status, ['cancelled', 'canceled', 'terminated', 'fraud'], true)) {
+            return false;
+        }
+
+        return trim((string) ($service['username'] ?? '')) === '';
+    }
+
+    private function clearAccountWhmcsCache(int $clientId): void
+    {
+        if ($clientId <= 0) {
+            return;
+        }
+
+        $dir = STORAGE_PATH . '/cache/account-whmcs';
+        foreach (['invoices', 'products', 'domains'] as $key) {
+            $file = $dir . '/' . sha1($clientId . ':' . $key) . '.json';
+            if (is_file($file)) {
+                @unlink($file);
             }
         }
     }

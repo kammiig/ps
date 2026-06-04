@@ -148,6 +148,16 @@ final class PaymentRepository
         $stmt->execute(['id' => $id, 'message' => substr($message, 0, 500)]);
     }
 
+    public function markPendingForReconciliation(int $id, string $message): void
+    {
+        $stmt = $this->db->prepare(
+            'UPDATE customer_orders
+             SET payment_status = "pending", last_error = :message, updated_at = NOW()
+             WHERE id = :id'
+        );
+        $stmt->execute(['id' => $id, 'message' => substr($message, 0, 500)]);
+    }
+
     public function recentForCustomer(int $customerId, int $limit = 5): array
     {
         $stmt = $this->db->prepare(
