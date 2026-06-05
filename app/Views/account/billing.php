@@ -28,13 +28,17 @@
                                     <?php
                                     $invoiceId = (int) ($invoice['id'] ?? $invoice['invoiceid'] ?? 0);
                                     $status = (string) ($invoice['status'] ?? 'Pending');
-                                    $isUnpaid = in_array(strtolower($status), ['unpaid', 'payment pending'], true);
+                                    $statusKey = strtolower($status);
+                                    $isUnpaid = in_array($statusKey, ['unpaid', 'payment pending', 'pending payment', 'payment failed'], true);
+                                    $amount = in_array($statusKey, ['paid', 'payment failed'], true)
+                                        ? ($invoice['total'] ?? $invoice['balance'] ?? '0.00')
+                                        : ($invoice['balance'] ?? $invoice['total'] ?? '0.00');
                                     ?>
                                     <tr>
                                         <td>#<?= e($invoiceId) ?></td>
                                         <td><?= e($invoice['date'] ?? '') ?></td>
                                         <td><?= e($invoice['duedate'] ?? '') ?></td>
-                                        <td><?= e(money($invoice['balance'] ?? $invoice['total'] ?? '0.00')) ?></td>
+                                        <td><?= e(money($amount)) ?></td>
                                         <td><span class="status-pill"><?= e($status) ?></span></td>
                                         <td>
                                             <?php if ($isUnpaid && $invoiceId > 0): ?>

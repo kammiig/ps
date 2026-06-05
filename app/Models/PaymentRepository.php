@@ -170,6 +170,35 @@ final class PaymentRepository
         return $stmt->fetchAll();
     }
 
+    public function forAccount(?int $customerId, ?int $whmcsClientId, int $limit = 50): array
+    {
+        $clauses = [];
+        $params = [];
+
+        if ($customerId !== null && $customerId > 0) {
+            $clauses[] = 'customer_user_id = :customer_id';
+            $params['customer_id'] = $customerId;
+        }
+
+        if ($whmcsClientId !== null && $whmcsClientId > 0) {
+            $clauses[] = 'whmcs_client_id = :whmcs_client_id';
+            $params['whmcs_client_id'] = $whmcsClientId;
+        }
+
+        if (!$clauses) {
+            return [];
+        }
+
+        $stmt = $this->db->prepare(
+            'SELECT * FROM customer_orders
+             WHERE (' . implode(' OR ', $clauses) . ')
+             ORDER BY COALESCE(paid_at, updated_at, created_at) DESC, id DESC
+             LIMIT ' . max(1, min(200, $limit))
+        );
+        $stmt->execute($params);
+        return $stmt->fetchAll();
+    }
+
     public function insertWebhookEvent(string $eventId, string $type, string $paymentIntentId = '', ?int $orderId = null): bool
     {
         $stmt = $this->db->prepare(

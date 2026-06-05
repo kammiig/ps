@@ -235,7 +235,7 @@ final class AccountController extends Controller
         $account = $this->fullUser($user);
         $services = $this->clientServices($account, false);
         $invoices = $this->clientInvoices($account, false);
-        $recentPayments = $this->safeRecentPayments((int) $account['id'], 3);
+        $recentPayments = $this->accountPaymentOrders($account, 3);
 
         return $this->render('account/dashboard', $this->baseData('account-dashboard', [
             'account' => $account,
@@ -266,7 +266,7 @@ final class AccountController extends Controller
         return $this->render('account/billing', $this->baseData('account-billing', [
             'account' => $account,
             'invoices' => $this->clientInvoices($account),
-            'payments' => $this->safeRecentPayments((int) $account['id'], 10),
+            'payments' => $this->accountPaymentOrders($account, 10),
         ]));
     }
 
@@ -369,13 +369,14 @@ final class AccountController extends Controller
 
     private function clientServices(array $account, bool $allowLiveLoad = true): array
     {
-        if (empty($account['whmcs_client_id'])) {
-            return [];
+        $services = [];
+        if (!empty($account['whmcs_client_id'])) {
+            $clientId = (int) $account['whmcs_client_id'];
+            $result = $this->cachedWhmcsRead($clientId, 'products', fn (): array => $this->whmcs->productsForClient($clientId), $allowLiveLoad);
+            $services = $result['ok'] ? array_map([$this, 'friendlyService'], $result['products']) : [];
         }
 
-        $clientId = (int) $account['whmcs_client_id'];
-        $result = $this->cachedWhmcsRead($clientId, 'products', fn (): array => $this->whmcs->productsForClient($clientId), $allowLiveLoad);
-        return $result['ok'] ? array_map([$this, 'friendlyService'], $result['products']) : [];
+        return $this->mergeLocalServices($account, $services);
     }
 
     private function clientDomains(array $account, bool $allowLiveLoad = true): array
@@ -391,13 +392,199 @@ final class AccountController extends Controller
 
     private function clientInvoices(array $account, bool $allowLiveLoad = true): array
     {
-        if (empty($account['whmcs_client_id'])) {
-            return [];
+        $invoices = [];
+        if (!empty($account['whmcs_client_id'])) {
+            $clientId = (int) $account['whmcs_client_id'];
+            $result = $this->cachedWhmcsRead($clientId, 'invoices', fn (): array => $this->whmcs->invoicesForClient($clientId), $allowLiveLoad);
+            $invoices = $result['ok'] ? $result['invoices'] : [];
         }
 
-        $clientId = (int) $account['whmcs_client_id'];
-        $result = $this->cachedWhmcsRead($clientId, 'invoices', fn (): array => $this->whmcs->invoicesForClient($clientId), $allowLiveLoad);
-        return $result['ok'] ? $result['invoices'] : [];
+        return $this->mergeLocalInvoices($account, $invoices);
+    }
+
+    private function mergeLocalInvoices(array $account, array $invoices): array
+    {
+        $merged = [];
+        foreach ($invoices as $invoice) {
+            $invoiceId = (int) ($invoice['id'] ?? $invoice['invoiceid'] ?? 0);
+            if ($invoiceId > 0) {
+                $merged[$invoiceId] = $invoice;
+            }
+        }
+
+        foreach ($this->accountPaymentOrders($account, 200) as $order) {
+            $invoiceId = (int) ($order['whmcs_invoice_id'] ?? 0);
+            if ($invoiceId <= 0) {
+                continue;
+            }
+
+            $localInvoice = $this->localInvoiceRow($order);
+            if (!isset($merged[$invoiceId])) {
+                $merged[$invoiceId] = $localInvoice;
+                continue;
+            }
+
+            $amount = $this->accountMoneyToFloat($order['invoice_amount'] ?? '0.00');
+            $existing = $merged[$invoiceId];
+            $existingAmount = max(
+                $this->accountMoneyToFloat($existing['total'] ?? '0.00'),
+                $this->accountMoneyToFloat($existing['balance'] ?? '0.00')
+            );
+
+            if ($existingAmount <= 0.0 && $amount > 0.0) {
+                $existing['total'] = number_format($amount, 2, '.', '');
+            }
+
+            if ((string) ($order['payment_status'] ?? '') === 'paid') {
+                $existing['status'] = 'Paid';
+                $existing['balance'] = '0.00';
+                $existing['_local_paid'] = true;
+            }
+
+            $existing['_local_sort_at'] = $localInvoice['_local_sort_at'];
+            $existing['_local_order_id'] = $localInvoice['_local_order_id'];
+            $existing['_local_payment_status'] = $localInvoice['_local_payment_status'];
+            $merged[$invoiceId] = $existing;
+        }
+
+        $rows = array_values($merged);
+        usort($rows, function (array $left, array $right): int {
+            $leftId = (int) ($left['id'] ?? $left['invoiceid'] ?? 0);
+            $rightId = (int) ($right['id'] ?? $right['invoiceid'] ?? 0);
+            if ($leftId !== $rightId) {
+                return $rightId <=> $leftId;
+            }
+
+            return strcmp((string) ($right['_local_sort_at'] ?? $right['date'] ?? ''), (string) ($left['_local_sort_at'] ?? $left['date'] ?? ''));
+        });
+
+        return $rows;
+    }
+
+    private function localInvoiceRow(array $order): array
+    {
+        $invoiceId = (int) ($order['whmcs_invoice_id'] ?? 0);
+        $status = match ((string) ($order['payment_status'] ?? 'pending')) {
+            'paid' => 'Paid',
+            'failed' => 'Payment Failed',
+            'processing' => 'Pending Payment',
+            default => 'Unpaid',
+        };
+
+        $amount = number_format($this->accountMoneyToFloat($order['invoice_amount'] ?? '0.00'), 2, '.', '');
+        $date = substr((string) ($order['created_at'] ?? $order['paid_at'] ?? date('Y-m-d')), 0, 10);
+
+        return [
+            'id' => $invoiceId,
+            'invoiceid' => $invoiceId,
+            'date' => $date,
+            'duedate' => $date,
+            'total' => $amount,
+            'balance' => $status === 'Paid' ? '0.00' : $amount,
+            'status' => $status,
+            '_local_order_id' => (int) ($order['id'] ?? 0),
+            '_local_payment_status' => (string) ($order['payment_status'] ?? 'pending'),
+            '_local_sort_at' => (string) ($order['paid_at'] ?? $order['updated_at'] ?? $order['created_at'] ?? ''),
+        ];
+    }
+
+    private function mergeLocalServices(array $account, array $services): array
+    {
+        $websitePrice = $this->configuredAccountWebsitePrice();
+        if ($websitePrice <= 0.0) {
+            return $services;
+        }
+
+        $existingKeys = [];
+        foreach ($services as $service) {
+            $existingKeys[] = strtolower(trim((string) ($service['name'] ?? $service['productname'] ?? ''))) . ':' . trim((string) ($service['domain'] ?? ''));
+        }
+
+        $localServices = [];
+        foreach ($this->accountPaymentOrders($account, 200) as $order) {
+            $amount = $this->accountMoneyToFloat($order['invoice_amount'] ?? '0.00');
+            if (abs($amount - $websitePrice) > 0.01) {
+                continue;
+            }
+
+            $paymentStatus = (string) ($order['payment_status'] ?? 'pending');
+            if (!in_array($paymentStatus, ['paid', 'processing', 'pending'], true)) {
+                continue;
+            }
+
+            $invoiceId = (int) ($order['whmcs_invoice_id'] ?? 0);
+            $key = 'bespoke website development:invoice #' . $invoiceId;
+            if (in_array($key, $existingKeys, true)) {
+                continue;
+            }
+
+            $localServices[] = [
+                'id' => 'local-order-' . (int) ($order['id'] ?? 0),
+                'name' => 'Bespoke Website Development',
+                'productname' => 'Bespoke Website Development',
+                'domain' => $invoiceId > 0 ? 'Website package invoice #' . $invoiceId : 'Website package order',
+                'status' => $paymentStatus === 'paid' ? 'active' : 'pending',
+                'friendly_status' => $paymentStatus === 'paid' ? 'Paid' : 'Pending Payment',
+                'billingcycle' => 'One-time',
+                'regdate' => substr((string) ($order['created_at'] ?? ''), 0, 10) ?: 'Not available',
+                'registrationdate' => substr((string) ($order['created_at'] ?? ''), 0, 10) ?: 'Not available',
+                'nextduedate' => 'Not applicable',
+                'recurringamount' => $amount,
+                'amount' => $amount,
+                '_local_order_id' => (int) ($order['id'] ?? 0),
+            ];
+        }
+
+        return array_merge($localServices, $services);
+    }
+
+    private function accountPaymentOrders(array $account, int $limit): array
+    {
+        try {
+            $customerId = isset($account['id']) ? (int) $account['id'] : null;
+            $whmcsClientId = isset($account['whmcs_client_id']) ? (int) $account['whmcs_client_id'] : null;
+
+            return $this->payments->forAccount($customerId, $whmcsClientId, $limit);
+        } catch (\Throwable $exception) {
+            $this->logAccountIssue('Customer payment history could not be loaded.', [
+                'customer_id' => (int) ($account['id'] ?? 0),
+                'whmcs_client_id' => (int) ($account['whmcs_client_id'] ?? 0),
+                'type' => get_class($exception),
+                'message' => $exception->getMessage(),
+            ]);
+
+            return [];
+        }
+    }
+
+    private function configuredAccountWebsitePrice(): float
+    {
+        $package = $this->content->package();
+        return $this->accountMoneyToFloat($package['price'] ?? '199.00');
+    }
+
+    private function accountMoneyToFloat(mixed $value): float
+    {
+        if (is_int($value) || is_float($value)) {
+            return round((float) $value, 2);
+        }
+
+        if (!is_string($value)) {
+            return 0.0;
+        }
+
+        $clean = preg_replace('/[^0-9.,-]+/', '', $value) ?: '';
+        if ($clean === '' || $clean === '-' || $clean === '.' || $clean === ',') {
+            return 0.0;
+        }
+
+        if (str_contains($clean, ',') && !str_contains($clean, '.')) {
+            $clean = str_replace(',', '.', $clean);
+        } else {
+            $clean = str_replace(',', '', $clean);
+        }
+
+        return is_numeric($clean) ? round((float) $clean, 2) : 0.0;
     }
 
     private function accountDomain(array $domain): array
