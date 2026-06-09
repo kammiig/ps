@@ -474,6 +474,16 @@ final class SiteController extends Controller
             return $this->checkout([$customer['message']], $data);
         }
 
+        $checkoutPlan = in_array((string) ($data['order_type'] ?? ''), ['hosting', 'bundle'], true)
+            ? $this->checkoutPlanBySlug((string) ($data['hosting_plan'] ?? ''))
+            : null;
+        $packageLabel = match ((string) ($data['order_type'] ?? '')) {
+            'website' => 'Bespoke Website Development',
+            'domain' => 'Domain Registration',
+            'bundle' => 'Domain + ' . (string) ($checkoutPlan['title'] ?? 'Hosting'),
+            default => (string) ($checkoutPlan['title'] ?? 'Hosting Package'),
+        };
+
         $payment = (new PaymentRepository())->createOrUpdateOrder([
             'customer_user_id' => (int) $customer['user']['id'],
             'whmcs_client_id' => (int) $client['client_id'],
@@ -481,6 +491,11 @@ final class SiteController extends Controller
             'whmcs_invoice_id' => $invoiceId,
             'invoice_amount' => $amount,
             'currency' => $this->invoiceCurrency($invoiceData),
+            'order_type' => (string) ($data['order_type'] ?? ''),
+            'selected_domain' => (string) ($data['domain'] ?? ''),
+            'hosting_plan_slug' => (string) ($data['hosting_plan'] ?? ''),
+            'package_label' => $packageLabel,
+            'billing_cycle' => (string) ($data['billing_cycle'] ?? ''),
         ]);
 
         $this->redirect(url('/checkout/payment/' . $payment['public_token']));
@@ -896,16 +911,14 @@ final class SiteController extends Controller
             return ['ok' => true, 'invoice' => $invoice];
         }
 
-        $requiresRealInvoice = $this->requiresRealWhmcsInvoice($data);
-
-        if (!$requiresRealInvoice && $status !== 'paid' && $invoiceId > 0 && $amount < $expectedAmount) {
+        if ($status !== 'paid' && $invoiceId > 0 && $amount > 0 && $amount < $expectedAmount) {
             $repaired = $this->repairCheckoutInvoiceAmount($invoiceId, $orderId, $clientId, $amount, $expectedAmount, $data);
             if ($repaired['ok']) {
                 return $repaired;
             }
         }
 
-        if (!$requiresRealInvoice && ($status === 'paid' || $amount <= 0)) {
+        if ($this->canCreateStandaloneCheckoutInvoice($data) && ($status === 'paid' || $amount <= 0)) {
             $replacement = $this->createCheckoutInvoiceForExpectedAmount($orderId, $clientId, $data, $expectedAmount, 'non-payable or paid invoice');
             if ($replacement['ok']) {
                 return $replacement;
@@ -1033,7 +1046,7 @@ final class SiteController extends Controller
             return ['ok' => false, 'message' => 'The checkout invoice could not be created.'];
         }
 
-        if ($this->requiresRealWhmcsInvoice($data)) {
+        if (!$this->canCreateStandaloneCheckoutInvoice($data)) {
             $this->writeCheckoutLog('Refusing to create a standalone checkout invoice for a provisioning order.', [
                 'order_id' => $orderId,
                 'client_id' => $clientId,
@@ -1185,7 +1198,7 @@ final class SiteController extends Controller
             return ['ok' => false, 'message' => $message ?: 'Unable to load invoice amount.'];
         }
 
-        if ($this->requiresRealWhmcsInvoice($data)) {
+        if (!$this->canCreateStandaloneCheckoutInvoice($data)) {
             $this->writeCheckoutLog('Refusing configured checkout fallback for a provisioning order.', [
                 'invoice_id' => $invoiceId,
                 'order_id' => $orderId,
@@ -1900,7 +1913,12 @@ final class SiteController extends Controller
 
     private function requiresRealWhmcsInvoice(array $data): bool
     {
-        return in_array((string) ($data['order_type'] ?? ''), ['hosting', 'bundle'], true);
+        return !$this->canCreateStandaloneCheckoutInvoice($data);
+    }
+
+    private function canCreateStandaloneCheckoutInvoice(array $data): bool
+    {
+        return in_array((string) ($data['order_type'] ?? ''), ['hosting', 'website'], true);
     }
 
     private function appendNameservers(array $payload): array

@@ -759,7 +759,7 @@ final class WhmcsService
 
         $decoded = $this->callApi([
             'action' => 'ModuleCreate',
-            'serviceid' => $serviceId,
+            'accountid' => $serviceId,
             'responsetype' => 'json',
         ]);
 

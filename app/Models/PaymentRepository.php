@@ -10,6 +10,7 @@ use PDO;
 final class PaymentRepository
 {
     private PDO $db;
+    private ?array $customerOrderColumns = null;
 
     public function __construct()
     {
@@ -19,38 +20,74 @@ final class PaymentRepository
     public function createOrUpdateOrder(array $data): array
     {
         $existing = $this->findByInvoiceId((int) $data['whmcs_invoice_id']);
+        $optional = $this->optionalOrderFields($data);
         if ($existing) {
             if ($existing['payment_status'] !== 'paid') {
+                $set = [
+                    'customer_user_id = :customer_user_id',
+                    'whmcs_client_id = :whmcs_client_id',
+                    'whmcs_order_id = :whmcs_order_id',
+                    'invoice_amount = :invoice_amount',
+                    'currency = :currency',
+                    'payment_status = IF(payment_status = "paid", payment_status, "pending")',
+                    'last_error = NULL',
+                    'updated_at = NOW()',
+                ];
+                foreach ($optional as $field => $value) {
+                    $set[] = $field . ' = :' . $field;
+                }
+
                 $stmt = $this->db->prepare(
-                    'UPDATE customer_orders
-                     SET customer_user_id = :customer_user_id, whmcs_client_id = :whmcs_client_id,
-                         whmcs_order_id = :whmcs_order_id, invoice_amount = :invoice_amount,
-                         currency = :currency, payment_status = IF(payment_status = "paid", payment_status, "pending"),
-                         last_error = NULL, updated_at = NOW()
-                     WHERE id = :id'
+                    'UPDATE customer_orders SET ' . implode(', ', $set) . ' WHERE id = :id'
                 );
-                $stmt->execute([
+                $params = [
                     'id' => (int) $existing['id'],
                     'customer_user_id' => $data['customer_user_id'] ?? $existing['customer_user_id'],
                     'whmcs_client_id' => (int) $data['whmcs_client_id'],
                     'whmcs_order_id' => $data['whmcs_order_id'] ?? null,
                     'invoice_amount' => number_format((float) $data['invoice_amount'], 2, '.', ''),
                     'currency' => strtoupper((string) $data['currency']),
-                ]);
+                ];
+                $stmt->execute(array_merge($params, $optional));
             }
 
             return $this->find((int) $existing['id']) ?? $existing;
         }
 
+        $columns = [
+            'public_token',
+            'customer_user_id',
+            'whmcs_client_id',
+            'whmcs_order_id',
+            'whmcs_invoice_id',
+            'invoice_amount',
+            'currency',
+        ];
+        $values = [
+            ':public_token',
+            ':customer_user_id',
+            ':whmcs_client_id',
+            ':whmcs_order_id',
+            ':whmcs_invoice_id',
+            ':invoice_amount',
+            ':currency',
+        ];
+        foreach ($optional as $field => $value) {
+            $columns[] = $field;
+            $values[] = ':' . $field;
+        }
+        $columns[] = 'payment_status';
+        $values[] = '"pending"';
+        $columns[] = 'created_at';
+        $values[] = 'NOW()';
+        $columns[] = 'updated_at';
+        $values[] = 'NOW()';
+
         $stmt = $this->db->prepare(
-            'INSERT INTO customer_orders
-             (public_token, customer_user_id, whmcs_client_id, whmcs_order_id, whmcs_invoice_id,
-              invoice_amount, currency, payment_status, created_at, updated_at)
-             VALUES
-             (:public_token, :customer_user_id, :whmcs_client_id, :whmcs_order_id, :whmcs_invoice_id,
-              :invoice_amount, :currency, "pending", NOW(), NOW())'
+            'INSERT INTO customer_orders (' . implode(', ', $columns) . ')
+             VALUES (' . implode(', ', $values) . ')'
         );
-        $stmt->execute([
+        $params = [
             'public_token' => bin2hex(random_bytes(32)),
             'customer_user_id' => $data['customer_user_id'] ?? null,
             'whmcs_client_id' => (int) $data['whmcs_client_id'],
@@ -58,7 +95,8 @@ final class PaymentRepository
             'whmcs_invoice_id' => (int) $data['whmcs_invoice_id'],
             'invoice_amount' => number_format((float) $data['invoice_amount'], 2, '.', ''),
             'currency' => strtoupper((string) $data['currency']),
-        ]);
+        ];
+        $stmt->execute(array_merge($params, $optional));
 
         return $this->find((int) $this->db->lastInsertId()) ?? [];
     }
@@ -237,5 +275,41 @@ final class PaymentRepository
             'status' => in_array($status, ['processed', 'failed'], true) ? $status : 'processed',
             'order_id' => $orderId,
         ]);
+    }
+
+    private function optionalOrderFields(array $data): array
+    {
+        $columns = $this->customerOrderColumns();
+        $fields = [];
+        foreach (['order_type', 'selected_domain', 'hosting_plan_slug', 'package_label', 'billing_cycle'] as $field) {
+            if (isset($columns[$field]) && array_key_exists($field, $data)) {
+                $limit = $field === 'selected_domain' ? 255 : 190;
+                $fields[$field] = $data[$field] !== null ? substr((string) $data[$field], 0, $limit) : null;
+            }
+        }
+
+        return $fields;
+    }
+
+    private function customerOrderColumns(): array
+    {
+        if ($this->customerOrderColumns !== null) {
+            return $this->customerOrderColumns;
+        }
+
+        try {
+            $stmt = $this->db->query('SHOW COLUMNS FROM customer_orders');
+            $columns = [];
+            foreach ($stmt->fetchAll() as $row) {
+                $field = (string) ($row['Field'] ?? $row['field'] ?? '');
+                if ($field !== '') {
+                    $columns[$field] = true;
+                }
+            }
+
+            return $this->customerOrderColumns = $columns;
+        } catch (\Throwable $exception) {
+            return $this->customerOrderColumns = [];
+        }
     }
 }

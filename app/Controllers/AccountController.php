@@ -490,52 +490,162 @@ final class AccountController extends Controller
 
     private function mergeLocalServices(array $account, array $services): array
     {
-        $websitePrice = $this->configuredAccountWebsitePrice();
-        if ($websitePrice <= 0.0) {
-            return $services;
-        }
-
         $existingKeys = [];
         foreach ($services as $service) {
-            $existingKeys[] = strtolower(trim((string) ($service['name'] ?? $service['productname'] ?? ''))) . ':' . trim((string) ($service['domain'] ?? ''));
+            $existingKeys[] = strtolower(trim((string) ($service['name'] ?? $service['productname'] ?? ''))) . ':' . strtolower(trim((string) ($service['domain'] ?? '')));
         }
 
+        $websitePrice = $this->configuredAccountWebsitePrice();
         $localServices = [];
         foreach ($this->accountPaymentOrders($account, 200) as $order) {
-            $amount = $this->accountMoneyToFloat($order['invoice_amount'] ?? '0.00');
-            if (abs($amount - $websitePrice) > 0.01) {
-                continue;
-            }
-
             $paymentStatus = (string) ($order['payment_status'] ?? 'pending');
             if (!in_array($paymentStatus, ['paid', 'processing', 'pending'], true)) {
                 continue;
             }
 
-            $invoiceId = (int) ($order['whmcs_invoice_id'] ?? 0);
-            $key = 'bespoke website development:invoice #' . $invoiceId;
-            if (in_array($key, $existingKeys, true)) {
+            $type = $this->localOrderType($order, $websitePrice);
+            if ($type === '' || $type === 'domain') {
                 continue;
             }
 
+            $domain = trim((string) ($order['selected_domain'] ?? ''));
+            if ($domain === '') {
+                $invoiceId = (int) ($order['whmcs_invoice_id'] ?? 0);
+                $domain = $type === 'website'
+                    ? ($invoiceId > 0 ? 'Website package invoice #' . $invoiceId : 'Website package order')
+                    : 'Hosting service';
+            }
+
+            $name = $this->localOrderServiceName($order, $type);
+            $key = strtolower($name) . ':' . strtolower($domain);
+            if (in_array($key, $existingKeys, true)) {
+                continue;
+            }
+            $existingKeys[] = $key;
+
+            $amount = $this->accountMoneyToFloat($order['invoice_amount'] ?? '0.00');
+            $cycle = $this->localOrderBillingCycle($order);
+            $createdAt = substr((string) ($order['created_at'] ?? ''), 0, 10) ?: 'Not available';
+            $status = match ($paymentStatus) {
+                'paid' => $type === 'website' ? 'paid' : 'active',
+                'processing' => 'processing',
+                default => 'pending',
+            };
+            $friendly = match ($paymentStatus) {
+                'paid' => $type === 'website' ? 'Paid' : 'Active',
+                'processing' => 'Processing',
+                default => 'Pending Payment',
+            };
+
             $localServices[] = [
                 'id' => 'local-order-' . (int) ($order['id'] ?? 0),
-                'name' => 'Bespoke Website Development',
-                'productname' => 'Bespoke Website Development',
-                'domain' => $invoiceId > 0 ? 'Website package invoice #' . $invoiceId : 'Website package order',
-                'status' => $paymentStatus === 'paid' ? 'active' : 'pending',
-                'friendly_status' => $paymentStatus === 'paid' ? 'Paid' : 'Pending Payment',
-                'billingcycle' => 'One-time',
-                'regdate' => substr((string) ($order['created_at'] ?? ''), 0, 10) ?: 'Not available',
-                'registrationdate' => substr((string) ($order['created_at'] ?? ''), 0, 10) ?: 'Not available',
-                'nextduedate' => 'Not applicable',
-                'recurringamount' => $amount,
+                'name' => $name,
+                'productname' => $name,
+                'domain' => $domain,
+                'status' => $status,
+                'friendly_status' => $friendly,
+                'billingcycle' => $cycle,
+                'regdate' => $createdAt,
+                'registrationdate' => $createdAt,
+                'nextduedate' => $this->localOrderNextDueDate($order, $cycle),
+                'recurringamount' => $type === 'website' ? 0.0 : $amount,
                 'amount' => $amount,
                 '_local_order_id' => (int) ($order['id'] ?? 0),
             ];
         }
 
         return array_merge($localServices, $services);
+    }
+
+    private function localOrderType(array $order, float $websitePrice): string
+    {
+        $type = strtolower(trim((string) ($order['order_type'] ?? '')));
+        if ($type !== '') {
+            return $type;
+        }
+
+        $amount = $this->accountMoneyToFloat($order['invoice_amount'] ?? '0.00');
+        if ($websitePrice > 0.0 && abs($amount - $websitePrice) <= 0.01) {
+            return 'website';
+        }
+
+        if (trim((string) ($order['hosting_plan_slug'] ?? '')) !== '') {
+            return 'hosting';
+        }
+
+        return '';
+    }
+
+    private function localOrderServiceName(array $order, string $type): string
+    {
+        $label = trim((string) ($order['package_label'] ?? ''));
+        if ($label !== '' && !in_array($label, ['Domain Registration', 'Domain + Hosting'], true)) {
+            return $label;
+        }
+
+        if ($type === 'website') {
+            return 'Bespoke Website Development';
+        }
+
+        if ($type === 'bundle') {
+            return 'Domain + ' . $this->hostingPlanTitleFromSlug((string) ($order['hosting_plan_slug'] ?? ''));
+        }
+
+        return $this->hostingPlanTitleFromSlug((string) ($order['hosting_plan_slug'] ?? ''));
+    }
+
+    private function hostingPlanTitleFromSlug(string $slug): string
+    {
+        $slug = trim($slug);
+        if ($slug !== '') {
+            foreach ($this->content->hostingPlans(null, true) as $plan) {
+                if ((string) ($plan['slug'] ?? '') === $slug) {
+                    return (string) ($plan['title'] ?? $slug);
+                }
+            }
+
+            return ucwords(str_replace('-', ' ', $slug));
+        }
+
+        return 'Hosting Package';
+    }
+
+    private function localOrderBillingCycle(array $order): string
+    {
+        $type = strtolower(trim((string) ($order['order_type'] ?? '')));
+        $cycle = strtolower(trim((string) ($order['billing_cycle'] ?? '')));
+        if ($type === 'website') {
+            return 'One-time';
+        }
+
+        if (in_array($cycle, ['annually', 'yearly', 'annual'], true)) {
+            return 'Yearly';
+        }
+
+        if ($cycle === 'monthly') {
+            return 'Monthly';
+        }
+
+        return $cycle !== '' ? ucwords(str_replace('-', ' ', $cycle)) : 'Monthly';
+    }
+
+    private function localOrderNextDueDate(array $order, string $cycle): string
+    {
+        if ($cycle === 'One-time') {
+            return 'Not applicable';
+        }
+
+        $base = (string) ($order['paid_at'] ?? $order['created_at'] ?? '');
+        if ($base === '') {
+            return 'Not available';
+        }
+
+        try {
+            $date = new \DateTimeImmutable(substr($base, 0, 10));
+            return $date->add($cycle === 'Yearly' ? new \DateInterval('P1Y') : new \DateInterval('P1M'))->format('Y-m-d');
+        } catch (\Throwable $exception) {
+            return 'Not available';
+        }
     }
 
     private function accountPaymentOrders(array $account, int $limit): array
