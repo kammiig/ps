@@ -36,6 +36,8 @@ final class ContentRepository
         $settings['whmcs_payment_method'] ??= env('WHMCS_PAYMENT_METHOD', 'stripe');
         $settings['whmcs_payment_gateway_name'] ??= env('WHMCS_PAYMENT_GATEWAY_NAME', '');
         $settings['whmcs_domain_registrar'] ??= env('WHMCS_DOMAIN_REGISTRAR', '');
+        $settings['website_development_product_ids'] ??= env('WEBSITE_DEVELOPMENT_PRODUCT_IDS', env('WHMCS_WEBSITE_PACKAGE_PID', ''));
+        $settings['cloudflare_zone_map'] ??= env('CLOUDFLARE_ZONE_MAP', '');
         $settings['admin_email'] ??= env('ADMIN_EMAIL', '');
         $settings['mail_from'] ??= env('MAIL_FROM', '');
 
@@ -400,6 +402,8 @@ final class ContentRepository
             'inquiries' => (int) $this->db->query('SELECT COUNT(*) FROM inquiries')->fetchColumn(),
             'new_inquiries' => (int) $this->db->query("SELECT COUNT(*) FROM inquiries WHERE status = 'new'")->fetchColumn(),
             'website_projects' => $this->safeCount('website_projects'),
+            'support_tickets' => $this->safeCount('support_tickets'),
+            'open_support_tickets' => $this->safeWhereCount('support_tickets', "status != 'Closed'"),
         ];
     }
 
@@ -407,6 +411,15 @@ final class ContentRepository
     {
         try {
             return (int) $this->db->query('SELECT COUNT(*) FROM ' . $table)->fetchColumn();
+        } catch (\Throwable) {
+            return 0;
+        }
+    }
+
+    private function safeWhereCount(string $table, string $where): int
+    {
+        try {
+            return (int) $this->db->query('SELECT COUNT(*) FROM ' . $table . ' WHERE ' . $where)->fetchColumn();
         } catch (\Throwable) {
             return 0;
         }

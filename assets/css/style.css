@@ -2290,7 +2290,7 @@ body.modal-open {
 }
 
 .account-stat-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 
 .account-grid.two {
@@ -2377,6 +2377,52 @@ body.modal-open {
     gap: 18px;
 }
 
+.ticket-form,
+.dns-record-form {
+    display: grid;
+    gap: 18px;
+}
+
+.ticket-form-grid,
+.dns-record-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.ticket-form-grid .wide,
+.dns-record-grid .wide {
+    grid-column: 1 / -1;
+}
+
+.dns-record-list {
+    display: grid;
+    gap: 14px;
+    margin-top: 22px;
+}
+
+.dns-record-card {
+    display: grid;
+    gap: 12px;
+    padding: 16px;
+    background: #f8fbfd;
+    border: 1px solid #e5edf4;
+    border-radius: var(--radius);
+}
+
+.dns-record-card > form:last-child {
+    justify-self: end;
+}
+
+.dns-record-form.compact {
+    gap: 12px;
+}
+
+.dns-record-grid.compact {
+    grid-template-columns: minmax(110px, .45fr) minmax(180px, 1fr) minmax(0, 1.4fr) minmax(100px, .45fr) minmax(100px, .45fr);
+    align-items: end;
+}
+
 .dns-nameserver-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2403,6 +2449,88 @@ body.modal-open {
 
 .dns-form .btn {
     width: fit-content;
+}
+
+.ticket-row-link {
+    color: inherit;
+}
+
+.ticket-meta-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin: 0;
+}
+
+.ticket-meta-grid div {
+    padding: 14px;
+    background: #f8fbfd;
+    border: 1px solid #e5edf4;
+    border-radius: var(--radius);
+}
+
+.ticket-meta-grid dt {
+    color: var(--muted);
+    font-size: .82rem;
+    font-weight: 850;
+}
+
+.ticket-meta-grid dd {
+    margin: 4px 0 0;
+    color: var(--navy);
+    font-weight: 900;
+}
+
+.ticket-thread {
+    display: grid;
+    gap: 14px;
+}
+
+.ticket-message {
+    display: grid;
+    gap: 10px;
+    padding: 16px;
+    background: #f8fbfd;
+    border: 1px solid #e5edf4;
+    border-radius: var(--radius);
+}
+
+.ticket-message.from-admin {
+    background: var(--mint);
+    border-color: rgba(18, 184, 166, .28);
+}
+
+.ticket-message-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    color: var(--muted);
+    font-size: .92rem;
+}
+
+.ticket-message-head strong {
+    color: var(--navy);
+}
+
+.ticket-message p {
+    margin-bottom: 0;
+    color: #34455b;
+}
+
+.ticket-attachments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.ticket-attachments a {
+    padding: 7px 10px;
+    color: var(--teal-dark);
+    background: var(--white);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    font-size: .9rem;
+    font-weight: 850;
 }
 
 .status-pill {
@@ -2931,7 +3059,7 @@ textarea {
 
 .admin-stats {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
     gap: 18px;
     margin-bottom: 24px;
 }
@@ -2994,6 +3122,17 @@ td {
 
 .table-actions form {
     margin: 0;
+}
+
+.admin-inline-filter {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.admin-inline-filter select {
+    min-width: 180px;
 }
 
 .admin-form .form-grid {
@@ -3222,6 +3361,10 @@ td {
         position: static;
     }
 
+    .dns-record-grid.compact {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
     .payment-summary,
     .account-sidebar {
         position: static;
@@ -3317,6 +3460,10 @@ td {
     .checkout-form-grid,
     .account-stat-grid,
     .service-account-grid,
+    .ticket-form-grid,
+    .dns-record-grid,
+    .dns-record-grid.compact,
+    .ticket-meta-grid,
     .testimonial-grid,
     .tld-grid,
     .blog-grid,

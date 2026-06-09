@@ -6,6 +6,7 @@
                 <span class="section-kicker">Billing</span>
                 <h1>Invoices and payments</h1>
                 <p>Review invoices and pay outstanding balances securely on this website.</p>
+                <a class="btn btn-outline btn-small" href="<?= e(url('/account/tickets/new?department=Billing&subject=Billing%20support%20request')) ?>">Open Ticket</a>
             </div>
 
             <section class="account-card">
@@ -47,7 +48,7 @@
                                                     <button class="btn btn-primary btn-small" type="submit">Pay Now</button>
                                                 </form>
                                             <?php else: ?>
-                                                <span class="muted-text">No action</span>
+                                                <a class="btn btn-outline btn-small" href="<?= e(url('/account/tickets/new?department=Billing&subject=' . rawurlencode('Question about invoice #' . $invoiceId) . '&related_type=invoice&related_label=' . rawurlencode('Invoice #' . $invoiceId) . '&related_reference=' . rawurlencode((string) $invoiceId))) ?>">Open Ticket</a>
                                             <?php endif; ?>
                                         </td>
                                     </tr>

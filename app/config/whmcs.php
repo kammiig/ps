@@ -62,6 +62,7 @@ return [
     ],
     'website_package' => [
         'pid' => (int) env('WHMCS_WEBSITE_PACKAGE_PID', 5),
+        'product_ids' => env('WEBSITE_DEVELOPMENT_PRODUCT_IDS', env('WHMCS_WEBSITE_PACKAGE_PID', 5)),
         'billing_cycle' => env('WHMCS_WEBSITE_BILLING_CYCLE', 'onetime'),
         'register_domain' => filter_var(env('WHMCS_WEBSITE_REGISTER_DOMAIN', true), FILTER_VALIDATE_BOOLEAN),
         'domain_price_override' => env('WHMCS_WEBSITE_DOMAIN_PRICE_OVERRIDE', '0.00'),

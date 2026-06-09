@@ -367,6 +367,125 @@ final class ProvisioningRepository
         ]);
     }
 
+    public function upsertHostingServiceForAccount(array $account, array $service, string $whmPackage = ''): void
+    {
+        $clientId = (int) ($account['whmcs_client_id'] ?? 0);
+        $serviceId = $this->firstInt($service, ['id', 'serviceid', 'service_id', 'hostingid', 'relid']);
+        if ($clientId <= 0 || $serviceId <= 0) {
+            return;
+        }
+
+        [$provisioningStatus, $hostingStatus] = $this->hostingStatuses((string) ($service['status'] ?? ''));
+        $itemKey = 'service:' . $serviceId;
+        $stmt = $this->db->prepare(
+            'INSERT INTO customer_provisioning_items
+             (customer_order_id, customer_user_id, whmcs_client_id, whmcs_order_id, whmcs_invoice_id,
+              item_type, item_key, display_name, domain_name, hosting_plan_slug, whm_package, billing_cycle,
+              payment_status, provisioning_status, hosting_setup_status, whmcs_service_id,
+              start_date, next_due_date, renewal_amount, provisioned_at, created_at, updated_at)
+             VALUES
+             (NULL, :customer_user_id, :whmcs_client_id, :whmcs_order_id, :whmcs_invoice_id,
+              "hosting", :item_key, :display_name, :domain_name, :hosting_plan_slug, :whm_package, :billing_cycle,
+              :payment_status, :provisioning_status, :hosting_setup_status, :whmcs_service_id,
+              :start_date, :next_due_date, :renewal_amount, :provisioned_at, NOW(), NOW())
+             ON DUPLICATE KEY UPDATE
+              customer_user_id = VALUES(customer_user_id),
+              whmcs_order_id = COALESCE(VALUES(whmcs_order_id), whmcs_order_id),
+              whmcs_invoice_id = IF(VALUES(whmcs_invoice_id) > 0, VALUES(whmcs_invoice_id), whmcs_invoice_id),
+              display_name = VALUES(display_name),
+              domain_name = VALUES(domain_name),
+              hosting_plan_slug = COALESCE(VALUES(hosting_plan_slug), hosting_plan_slug),
+              whm_package = COALESCE(NULLIF(VALUES(whm_package), ""), whm_package),
+              billing_cycle = COALESCE(NULLIF(VALUES(billing_cycle), ""), billing_cycle),
+              payment_status = VALUES(payment_status),
+              provisioning_status = VALUES(provisioning_status),
+              hosting_setup_status = VALUES(hosting_setup_status),
+              whmcs_service_id = VALUES(whmcs_service_id),
+              start_date = VALUES(start_date),
+              next_due_date = VALUES(next_due_date),
+              renewal_amount = VALUES(renewal_amount),
+              provisioned_at = COALESCE(provisioned_at, VALUES(provisioned_at)),
+              updated_at = NOW()'
+        );
+        $stmt->execute([
+            'customer_user_id' => $this->nullableInt($account['id'] ?? null),
+            'whmcs_client_id' => $clientId,
+            'whmcs_order_id' => $this->nullableInt($service['orderid'] ?? $service['order_id'] ?? null),
+            'whmcs_invoice_id' => (int) ($service['invoiceid'] ?? $service['invoice_id'] ?? 0),
+            'item_key' => $itemKey,
+            'display_name' => (string) ($service['name'] ?? $service['productname'] ?? 'Hosting Package'),
+            'domain_name' => (string) ($service['domain'] ?? ''),
+            'hosting_plan_slug' => (string) ($service['slug'] ?? ''),
+            'whm_package' => $whmPackage,
+            'billing_cycle' => (string) ($service['billingcycle'] ?? ''),
+            'payment_status' => $provisioningStatus === 'active' ? 'paid' : 'processing',
+            'provisioning_status' => $provisioningStatus,
+            'hosting_setup_status' => $hostingStatus,
+            'whmcs_service_id' => $serviceId,
+            'start_date' => $this->dateOrNull($service['regdate'] ?? $service['registrationdate'] ?? null),
+            'next_due_date' => $this->dateOrNull($service['nextduedate'] ?? null),
+            'renewal_amount' => $this->amountOrNull($service['recurringamount'] ?? $service['amount'] ?? null),
+            'provisioned_at' => $provisioningStatus === 'active' ? date('Y-m-d H:i:s') : null,
+        ]);
+    }
+
+    public function upsertWebsiteProjectForAccount(array $account, array $service): void
+    {
+        $clientId = (int) ($account['whmcs_client_id'] ?? 0);
+        $serviceId = $this->firstInt($service, ['id', 'serviceid', 'service_id', 'hostingid', 'relid']);
+        if ($clientId <= 0 || $serviceId <= 0) {
+            return;
+        }
+
+        $status = strtolower((string) ($service['status'] ?? ''));
+        $paid = in_array($status, ['active', 'completed'], true);
+        $stmt = $this->db->prepare(
+            'INSERT INTO website_projects
+             (customer_order_id, customer_user_id, whmcs_client_id, whmcs_order_id, whmcs_invoice_id,
+              whmcs_service_id, whmcs_product_id, package_name, domain_name, hosting_plan_slug,
+              payment_status, project_status, onboarding_status, estimated_next_step, purchase_date, created_at, updated_at)
+             VALUES
+             (NULL, :customer_user_id, :whmcs_client_id, :whmcs_order_id, :whmcs_invoice_id,
+              :whmcs_service_id, :whmcs_product_id, :package_name, :domain_name, :hosting_plan_slug,
+              :payment_status, :project_status, :onboarding_status, :estimated_next_step, :purchase_date, NOW(), NOW())
+             ON DUPLICATE KEY UPDATE
+              customer_user_id = VALUES(customer_user_id),
+              whmcs_order_id = COALESCE(VALUES(whmcs_order_id), whmcs_order_id),
+              whmcs_invoice_id = IF(VALUES(whmcs_invoice_id) > 0, VALUES(whmcs_invoice_id), whmcs_invoice_id),
+              whmcs_product_id = COALESCE(VALUES(whmcs_product_id), whmcs_product_id),
+              package_name = VALUES(package_name),
+              domain_name = COALESCE(VALUES(domain_name), domain_name),
+              payment_status = VALUES(payment_status),
+              project_status = CASE
+                WHEN project_status IN ("Payment Pending", "Payment Confirmed") THEN VALUES(project_status)
+                ELSE project_status
+              END,
+              onboarding_status = CASE
+                WHEN onboarding_status IN ("", "Payment Pending") THEN VALUES(onboarding_status)
+                ELSE onboarding_status
+              END,
+              estimated_next_step = COALESCE(estimated_next_step, VALUES(estimated_next_step)),
+              purchase_date = COALESCE(purchase_date, VALUES(purchase_date)),
+              updated_at = NOW()'
+        );
+        $stmt->execute([
+            'customer_user_id' => $this->nullableInt($account['id'] ?? null),
+            'whmcs_client_id' => $clientId,
+            'whmcs_order_id' => $this->nullableInt($service['orderid'] ?? $service['order_id'] ?? null),
+            'whmcs_invoice_id' => (int) ($service['invoiceid'] ?? $service['invoice_id'] ?? 0),
+            'whmcs_service_id' => $serviceId,
+            'whmcs_product_id' => $this->firstInt($service, ['pid', 'productid', 'product_id']),
+            'package_name' => (string) ($service['name'] ?? $service['productname'] ?? 'Website Development'),
+            'domain_name' => trim((string) ($service['domain'] ?? '')) ?: null,
+            'hosting_plan_slug' => null,
+            'payment_status' => $paid ? 'Payment Confirmed' : 'Payment Pending',
+            'project_status' => $paid ? 'Payment Confirmed' : 'Payment Pending',
+            'onboarding_status' => $paid ? 'Awaiting Client Details' : 'Payment Pending',
+            'estimated_next_step' => $paid ? 'Our team will contact you to collect the project details.' : 'Complete payment to start the website project.',
+            'purchase_date' => $this->dateOrNull($service['regdate'] ?? $service['registrationdate'] ?? null),
+        ]);
+    }
+
     public function itemsForAccount(?int $customerId, ?int $whmcsClientId, ?string $itemType = null): array
     {
         $clauses = [];

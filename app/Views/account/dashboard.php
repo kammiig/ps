@@ -6,12 +6,14 @@
                 <span class="section-kicker">My account</span>
                 <h1>Welcome, <?= e($account['first_name']) ?></h1>
                 <p>Manage your Planetic Solutions purchases, invoices and project updates from one place.</p>
+                <a class="btn btn-outline btn-small" href="<?= e(url('/account/tickets/new')) ?>">Open Ticket</a>
             </div>
 
             <div class="account-stat-grid">
                 <article><span>Domains</span><strong><?= e($domainCount) ?></strong></article>
                 <article><span>Hosting</span><strong><?= e($hostingCount) ?></strong></article>
                 <article><span>Website Development</span><strong><?= e($websiteProjectCount) ?></strong></article>
+                <article><span>Open tickets</span><strong><?= e($openTicketCount ?? 0) ?></strong></article>
                 <article><span>Unpaid invoices</span><strong><?= e($unpaidCount) ?></strong></article>
             </div>
 
@@ -50,6 +52,26 @@
                         </div>
                     <?php else: ?>
                         <p>No invoices are available yet.</p>
+                    <?php endif; ?>
+                </section>
+
+                <section class="account-card">
+                    <div class="section-head compact">
+                        <div><span class="section-kicker">Support</span><h2>Tickets</h2></div>
+                        <a class="text-link" href="<?= e(url('/account/tickets')) ?>">View tickets <?= icon('arrow') ?></a>
+                    </div>
+                    <?php if (!empty($recentTickets)): ?>
+                        <div class="account-list">
+                            <?php foreach ($recentTickets as $ticket): ?>
+                                <a class="account-row ticket-row-link" href="<?= e(url('/account/tickets/' . (int) $ticket['id'])) ?>">
+                                    <div><strong><?= e($ticket['subject'] ?? 'Support ticket') ?></strong><span>#<?= e($ticket['public_ref'] ?? $ticket['id']) ?></span></div>
+                                    <span class="status-pill"><?= e($ticket['status'] ?? 'Open') ?></span>
+                                </a>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php else: ?>
+                        <p>No support tickets yet.</p>
+                        <a class="btn btn-outline btn-small" href="<?= e(url('/account/tickets/new')) ?>">Open Ticket</a>
                     <?php endif; ?>
                 </section>
             </div>

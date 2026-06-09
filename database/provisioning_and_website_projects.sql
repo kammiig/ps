@@ -62,7 +62,7 @@ DROP PROCEDURE IF EXISTS add_customer_order_provisioning_columns;
 
 CREATE TABLE IF NOT EXISTS customer_provisioning_items (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    customer_order_id INT UNSIGNED NOT NULL,
+    customer_order_id INT UNSIGNED NULL,
     customer_user_id INT UNSIGNED NULL,
     whmcs_client_id INT UNSIGNED NOT NULL,
     whmcs_order_id INT UNSIGNED NULL,
@@ -96,6 +96,7 @@ CREATE TABLE IF NOT EXISTS customer_provisioning_items (
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL,
     UNIQUE KEY customer_provisioning_order_item_unique (customer_order_id, item_type, item_key),
+    UNIQUE KEY customer_provisioning_client_item_unique (whmcs_client_id, item_type, item_key),
     INDEX customer_provisioning_customer_index (customer_user_id),
     INDEX customer_provisioning_whmcs_client_index (whmcs_client_id),
     INDEX customer_provisioning_invoice_index (whmcs_invoice_id),
@@ -106,11 +107,13 @@ CREATE TABLE IF NOT EXISTS customer_provisioning_items (
 
 CREATE TABLE IF NOT EXISTS website_projects (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    customer_order_id INT UNSIGNED NOT NULL UNIQUE,
+    customer_order_id INT UNSIGNED NULL UNIQUE,
     customer_user_id INT UNSIGNED NULL,
     whmcs_client_id INT UNSIGNED NOT NULL,
     whmcs_order_id INT UNSIGNED NULL,
     whmcs_invoice_id INT UNSIGNED NOT NULL,
+    whmcs_service_id INT UNSIGNED NULL,
+    whmcs_product_id INT UNSIGNED NULL,
     package_name VARCHAR(190) NOT NULL,
     domain_name VARCHAR(255) NULL,
     hosting_plan_slug VARCHAR(120) NULL,
@@ -128,6 +131,7 @@ CREATE TABLE IF NOT EXISTS website_projects (
     INDEX website_projects_customer_index (customer_user_id),
     INDEX website_projects_whmcs_client_index (whmcs_client_id),
     INDEX website_projects_invoice_index (whmcs_invoice_id),
+    UNIQUE KEY website_projects_service_unique (whmcs_client_id, whmcs_service_id),
     INDEX website_projects_status_index (project_status),
     CONSTRAINT website_projects_order_fk FOREIGN KEY (customer_order_id) REFERENCES customer_orders(id) ON DELETE CASCADE,
     CONSTRAINT website_projects_user_fk FOREIGN KEY (customer_user_id) REFERENCES customer_users(id) ON DELETE SET NULL

@@ -14,6 +14,9 @@ DROP TABLE IF EXISTS seo_settings;
 DROP TABLE IF EXISTS settings;
 DROP TABLE IF EXISTS website_projects;
 DROP TABLE IF EXISTS customer_provisioning_items;
+DROP TABLE IF EXISTS support_ticket_attachments;
+DROP TABLE IF EXISTS support_ticket_messages;
+DROP TABLE IF EXISTS support_tickets;
 DROP TABLE IF EXISTS stripe_webhook_events;
 DROP TABLE IF EXISTS customer_orders;
 DROP TABLE IF EXISTS customer_password_resets;
@@ -115,7 +118,7 @@ CREATE TABLE customer_orders (
 
 CREATE TABLE customer_provisioning_items (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    customer_order_id INT UNSIGNED NOT NULL,
+    customer_order_id INT UNSIGNED NULL,
     customer_user_id INT UNSIGNED NULL,
     whmcs_client_id INT UNSIGNED NOT NULL,
     whmcs_order_id INT UNSIGNED NULL,
@@ -149,6 +152,7 @@ CREATE TABLE customer_provisioning_items (
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL,
     UNIQUE KEY customer_provisioning_order_item_unique (customer_order_id, item_type, item_key),
+    UNIQUE KEY customer_provisioning_client_item_unique (whmcs_client_id, item_type, item_key),
     INDEX customer_provisioning_customer_index (customer_user_id),
     INDEX customer_provisioning_whmcs_client_index (whmcs_client_id),
     INDEX customer_provisioning_invoice_index (whmcs_invoice_id),
@@ -159,11 +163,13 @@ CREATE TABLE customer_provisioning_items (
 
 CREATE TABLE website_projects (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    customer_order_id INT UNSIGNED NOT NULL UNIQUE,
+    customer_order_id INT UNSIGNED NULL UNIQUE,
     customer_user_id INT UNSIGNED NULL,
     whmcs_client_id INT UNSIGNED NOT NULL,
     whmcs_order_id INT UNSIGNED NULL,
     whmcs_invoice_id INT UNSIGNED NOT NULL,
+    whmcs_service_id INT UNSIGNED NULL,
+    whmcs_product_id INT UNSIGNED NULL,
     package_name VARCHAR(190) NOT NULL,
     domain_name VARCHAR(255) NULL,
     hosting_plan_slug VARCHAR(120) NULL,
@@ -181,6 +187,7 @@ CREATE TABLE website_projects (
     INDEX website_projects_customer_index (customer_user_id),
     INDEX website_projects_whmcs_client_index (whmcs_client_id),
     INDEX website_projects_invoice_index (whmcs_invoice_id),
+    UNIQUE KEY website_projects_service_unique (whmcs_client_id, whmcs_service_id),
     INDEX website_projects_status_index (project_status),
     CONSTRAINT website_projects_order_fk FOREIGN KEY (customer_order_id) REFERENCES customer_orders(id) ON DELETE CASCADE,
     CONSTRAINT website_projects_user_fk FOREIGN KEY (customer_user_id) REFERENCES customer_users(id) ON DELETE SET NULL
@@ -197,6 +204,57 @@ CREATE TABLE stripe_webhook_events (
     processed_at DATETIME NULL,
     INDEX stripe_webhook_events_payment_intent_index (payment_intent_id),
     CONSTRAINT stripe_webhook_events_order_fk FOREIGN KEY (customer_order_id) REFERENCES customer_orders(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE support_tickets (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    public_ref VARCHAR(32) NOT NULL UNIQUE,
+    customer_user_id INT UNSIGNED NOT NULL,
+    whmcs_client_id INT UNSIGNED NULL,
+    subject VARCHAR(190) NOT NULL,
+    department ENUM('Domain Support', 'Hosting Support', 'Website Development', 'Billing', 'General Support') NOT NULL DEFAULT 'General Support',
+    priority ENUM('Low', 'Medium', 'High', 'Urgent') NOT NULL DEFAULT 'Medium',
+    status ENUM('Open', 'Answered', 'Customer Reply', 'In Progress', 'On Hold', 'Closed') NOT NULL DEFAULT 'Open',
+    related_type VARCHAR(40) NULL,
+    related_label VARCHAR(190) NULL,
+    related_reference VARCHAR(190) NULL,
+    last_customer_reply_at DATETIME NULL,
+    last_admin_reply_at DATETIME NULL,
+    closed_at DATETIME NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    INDEX support_tickets_customer_index (customer_user_id),
+    INDEX support_tickets_status_index (status),
+    INDEX support_tickets_updated_index (updated_at),
+    CONSTRAINT support_tickets_customer_fk FOREIGN KEY (customer_user_id) REFERENCES customer_users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE support_ticket_messages (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    ticket_id INT UNSIGNED NOT NULL,
+    author_type ENUM('customer', 'admin') NOT NULL,
+    author_user_id INT UNSIGNED NULL,
+    author_name VARCHAR(160) NOT NULL,
+    message TEXT NOT NULL,
+    created_at DATETIME NOT NULL,
+    INDEX support_ticket_messages_ticket_index (ticket_id),
+    CONSTRAINT support_ticket_messages_ticket_fk FOREIGN KEY (ticket_id) REFERENCES support_tickets(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE support_ticket_attachments (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    ticket_id INT UNSIGNED NOT NULL,
+    message_id INT UNSIGNED NOT NULL,
+    uploaded_by_type ENUM('customer', 'admin') NOT NULL,
+    original_name VARCHAR(190) NOT NULL,
+    stored_path VARCHAR(255) NOT NULL,
+    mime_type VARCHAR(120) NULL,
+    file_size INT UNSIGNED NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL,
+    INDEX support_ticket_attachments_ticket_index (ticket_id),
+    INDEX support_ticket_attachments_message_index (message_id),
+    CONSTRAINT support_ticket_attachments_ticket_fk FOREIGN KEY (ticket_id) REFERENCES support_tickets(id) ON DELETE CASCADE,
+    CONSTRAINT support_ticket_attachments_message_fk FOREIGN KEY (message_id) REFERENCES support_ticket_messages(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE settings (

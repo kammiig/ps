@@ -489,6 +489,10 @@ final class PaymentController extends Controller
 
     private function provisionWhmcsOrderServicesAfterPayment(array $order, array $intent, string $source): void
     {
+        if (!$this->orderIncludesHosting($order)) {
+            return;
+        }
+
         $whmcsOrderId = (int) ($order['whmcs_order_id'] ?? 0);
         $whmcsClientId = (int) ($order['whmcs_client_id'] ?? 0);
         if ($whmcsOrderId <= 0 || $whmcsClientId <= 0) {

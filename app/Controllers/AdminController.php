@@ -10,18 +10,21 @@ use App\Core\Csrf;
 use App\Core\Upload;
 use App\Models\ContentRepository;
 use App\Models\ProvisioningRepository;
+use App\Models\TicketRepository;
 
 final class AdminController extends Controller
 {
     private Auth $auth;
     private ContentRepository $content;
     private ProvisioningRepository $provisioning;
+    private TicketRepository $tickets;
 
     public function __construct()
     {
         $this->auth = new Auth();
         $this->content = new ContentRepository();
         $this->provisioning = new ProvisioningRepository();
+        $this->tickets = new TicketRepository();
     }
 
     public function login(): string
@@ -57,10 +60,19 @@ final class AdminController extends Controller
     public function dashboard(): string
     {
         $this->requireAuth();
+        try {
+            $ticketCounts = $this->tickets->adminCounts();
+            $tickets = array_slice($this->tickets->ticketsForAdmin('', 10), 0, 5);
+        } catch (\Throwable) {
+            $ticketCounts = ['open' => 0, 'customer_reply' => 0, 'total' => 0];
+            $tickets = [];
+        }
 
         return $this->adminRender('admin/dashboard', [
             'counts' => $this->content->dashboardCounts(),
             'inquiries' => array_slice($this->content->inquiries(), 0, 5),
+            'ticketCounts' => $ticketCounts,
+            'tickets' => $tickets,
         ]);
     }
 
@@ -76,9 +88,9 @@ final class AdminController extends Controller
                     'company_name', 'tagline', 'app_url', 'logo_url', 'favicon_url', 'og_image',
                     'admin_email', 'mail_from', 'phone', 'whatsapp_number', 'address',
                     'facebook_url', 'instagram_url', 'linkedin_url', 'x_url',
-                    'whmcs_client_area_url', 'whmcs_api_url', 'whmcs_api_identifier', 'whmcs_api_secret', 'whmcs_payment_method', 'whmcs_payment_gateway_name', 'whmcs_domain_registrar', 'domain_hosting_pid',
+                    'whmcs_client_area_url', 'whmcs_api_url', 'whmcs_api_identifier', 'whmcs_api_secret', 'whmcs_payment_method', 'whmcs_payment_gateway_name', 'whmcs_domain_registrar', 'domain_hosting_pid', 'website_development_product_ids',
                     'google_analytics', 'recaptcha_site_key', 'recaptcha_secret_key',
-                    'cloudflare_zone_id', 'cloudflare_api_token', 'default_order_url',
+                    'cloudflare_zone_id', 'cloudflare_zone_map', 'cloudflare_api_token', 'default_order_url',
                 ]);
 
                 $data['recaptcha_enabled'] = $this->postedBool('recaptcha_enabled');
@@ -125,12 +137,14 @@ final class AdminController extends Controller
                 ['name' => 'whmcs_payment_gateway_name', 'label' => 'WHMCS Gateway Name for Stripe Invoice Payments', 'type' => 'text'],
                 ['name' => 'whmcs_domain_registrar', 'label' => 'WHMCS Registrar Module Name', 'type' => 'text'],
                 ['name' => 'domain_hosting_pid', 'label' => 'Domain + Hosting Product ID', 'type' => 'text'],
+                ['name' => 'website_development_product_ids', 'label' => 'Website Development Product IDs', 'type' => 'text'],
                 ['name' => 'default_order_url', 'label' => 'Default Get Started URL', 'type' => 'url'],
                 ['name' => 'google_analytics', 'label' => 'Google Analytics / Tracking Code', 'type' => 'textarea'],
                 ['name' => 'recaptcha_enabled', 'label' => 'Enable Google reCAPTCHA', 'type' => 'checkbox'],
                 ['name' => 'recaptcha_site_key', 'label' => 'reCAPTCHA Site Key', 'type' => 'text'],
                 ['name' => 'recaptcha_secret_key', 'label' => 'reCAPTCHA Secret Key', 'type' => 'password'],
                 ['name' => 'cloudflare_zone_id', 'label' => 'Cloudflare Zone ID', 'type' => 'text'],
+                ['name' => 'cloudflare_zone_map', 'label' => 'Cloudflare Zone Map', 'type' => 'textarea', 'rows' => 3],
                 ['name' => 'cloudflare_api_token', 'label' => 'Cloudflare API Token', 'type' => 'password'],
             ],
         ]);
@@ -281,6 +295,86 @@ final class AdminController extends Controller
                 ['name' => 'delivered_at', 'label' => 'Delivery Date (YYYY-MM-DD HH:MM:SS)', 'type' => 'text'],
             ],
         ]);
+    }
+
+    public function tickets(): string
+    {
+        $this->requireAuth();
+        $status = trim((string) ($_GET['status'] ?? ''));
+        if (!in_array($status, TicketRepository::STATUSES, true)) {
+            $status = '';
+        }
+
+        try {
+            $tickets = $this->tickets->ticketsForAdmin($status);
+            $counts = $this->tickets->adminCounts();
+        } catch (\Throwable $exception) {
+            $this->flash('Support tickets could not be loaded right now.', 'error');
+            $tickets = [];
+            $counts = ['open' => 0, 'customer_reply' => 0, 'total' => 0];
+        }
+
+        return $this->adminRender('admin/tickets', [
+            'title' => 'Support Tickets',
+            'tickets' => $tickets,
+            'statuses' => TicketRepository::STATUSES,
+            'selectedStatus' => $status,
+            'counts' => $counts,
+        ]);
+    }
+
+    public function ticketDetail(string $id, array $errors = []): string
+    {
+        $this->requireAuth();
+        try {
+            $ticket = $this->tickets->findForAdmin((int) $id);
+            if (!$ticket) {
+                $this->flash('Support ticket was not found.', 'error');
+                $this->redirect(url('/admin/tickets'));
+            }
+
+            return $this->adminRender('admin/ticket-detail', [
+                'title' => 'Support Ticket ' . (string) ($ticket['public_ref'] ?? ''),
+                'ticket' => $ticket,
+                'messages' => $this->tickets->messages((int) $ticket['id']),
+                'attachmentsByMessage' => $this->tickets->attachmentsByMessage((int) $ticket['id']),
+                'statuses' => TicketRepository::STATUSES,
+                'errors' => $errors,
+            ]);
+        } catch (\Throwable $exception) {
+            $this->flash('Support ticket details could not be loaded right now.', 'error');
+            $this->redirect(url('/admin/tickets'));
+        }
+    }
+
+    public function replyTicket(string $id): string
+    {
+        $this->requireAuth();
+        $this->verifyCsrf();
+        try {
+            $ticket = $this->tickets->findForAdmin((int) $id);
+            if (!$ticket) {
+                $this->flash('Support ticket was not found.', 'error');
+                $this->redirect(url('/admin/tickets'));
+            }
+        } catch (\Throwable) {
+            $this->flash('Support ticket could not be loaded right now.', 'error');
+            $this->redirect(url('/admin/tickets'));
+        }
+
+        $status = trim((string) ($_POST['status'] ?? $ticket['status'] ?? 'Answered'));
+        $message = trim((string) ($_POST['message'] ?? ''));
+        if ($message === '' && $status === (string) ($ticket['status'] ?? '')) {
+            return $this->ticketDetail($id, ['Enter a reply or choose a new status.']);
+        }
+
+        try {
+            $this->tickets->addAdminReply($ticket, $this->auth->user() ?? [], $message, $status, $this->ticketAttachments('attachment'));
+            $this->flash('Support ticket updated.');
+            $this->redirect(url('/admin/tickets/' . (int) $ticket['id']));
+        } catch (\Throwable $exception) {
+            return $this->ticketDetail($id, [$exception instanceof \RuntimeException ? $exception->getMessage() : 'Support ticket could not be updated right now.']);
+        }
     }
 
     public function plans(): string
@@ -751,7 +845,7 @@ final class AdminController extends Controller
     public function export(): string
     {
         $this->requireAuth();
-        $tables = ['settings', 'seo_settings', 'hosting_plans', 'domain_tlds', 'website_packages', 'pages', 'testimonials', 'faqs', 'blog_categories', 'blog_posts', 'inquiries', 'customer_users', 'customer_orders', 'customer_provisioning_items', 'website_projects', 'stripe_webhook_events'];
+        $tables = ['settings', 'seo_settings', 'hosting_plans', 'domain_tlds', 'website_packages', 'pages', 'testimonials', 'faqs', 'blog_categories', 'blog_posts', 'inquiries', 'customer_users', 'customer_orders', 'customer_provisioning_items', 'website_projects', 'support_tickets', 'support_ticket_messages', 'support_ticket_attachments', 'stripe_webhook_events'];
         $backup = [
             'generated_at' => date('c'),
             'site' => $this->content->settings()['company_name'] ?? 'Planetic Solutions',
@@ -769,6 +863,67 @@ final class AdminController extends Controller
         header('Content-Type: application/json; charset=UTF-8');
         header('Content-Disposition: attachment; filename="planetic-solutions-backup-' . date('Y-m-d') . '.json"');
         return json_encode($backup, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '{}';
+    }
+
+    private function ticketAttachments(string $field): array
+    {
+        if (empty($_FILES[$field]) || ($_FILES[$field]['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
+            return [];
+        }
+
+        $file = $_FILES[$field];
+        if (is_array($file['name'] ?? null)) {
+            return [];
+        }
+
+        if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+            throw new \RuntimeException('Attachment upload failed. Please try again.');
+        }
+
+        $size = (int) ($file['size'] ?? 0);
+        if ($size <= 0 || $size > 5 * 1024 * 1024) {
+            throw new \RuntimeException('Attachments must be smaller than 5MB.');
+        }
+
+        $original = basename((string) ($file['name'] ?? 'attachment'));
+        $extension = strtolower(pathinfo($original, PATHINFO_EXTENSION));
+        $allowed = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'pdf', 'txt', 'doc', 'docx'];
+        if (!in_array($extension, $allowed, true)) {
+            throw new \RuntimeException('Use JPG, PNG, WebP, GIF, PDF, TXT, DOC, or DOCX attachments.');
+        }
+
+        $folder = 'uploads/tickets/' . date('Y/m');
+        $targetDir = BASE_PATH . '/' . $folder;
+        if (!is_dir($targetDir) && !mkdir($targetDir, 0755, true) && !is_dir($targetDir)) {
+            throw new \RuntimeException('Attachment upload is temporarily unavailable.');
+        }
+
+        $storedName = bin2hex(random_bytes(12)) . '.' . $extension;
+        $target = $targetDir . '/' . $storedName;
+        if (!move_uploaded_file((string) ($file['tmp_name'] ?? ''), $target)) {
+            throw new \RuntimeException('Attachment could not be saved.');
+        }
+
+        return [[
+            'original_name' => $original,
+            'stored_path' => $folder . '/' . $storedName,
+            'mime_type' => $this->mimeType($target),
+            'file_size' => $size,
+        ]];
+    }
+
+    private function mimeType(string $path): string
+    {
+        if (function_exists('mime_content_type')) {
+            return (string) mime_content_type($path);
+        }
+
+        if (class_exists(\finfo::class)) {
+            $info = new \finfo(FILEINFO_MIME_TYPE);
+            return (string) $info->file($path);
+        }
+
+        return '';
     }
 
     private function adminRender(string $view, array $data = []): string

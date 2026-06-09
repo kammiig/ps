@@ -12,6 +12,9 @@ use App\Models\ContentRepository;
 use App\Models\CustomerRepository;
 use App\Models\PaymentRepository;
 use App\Models\ProvisioningRepository;
+use App\Models\TicketRepository;
+use App\Services\CloudflareDnsService;
+use App\Services\CustomerAccountSyncService;
 use App\Services\Mailer;
 use App\Services\WhmcsService;
 
@@ -21,6 +24,9 @@ final class AccountController extends Controller
     private CustomerRepository $customers;
     private PaymentRepository $payments;
     private ProvisioningRepository $provisioning;
+    private TicketRepository $tickets;
+    private CustomerAccountSyncService $accountSync;
+    private CloudflareDnsService $dnsProvider;
     private CustomerAuth $auth;
     private WhmcsService $whmcs;
     private array $settings;
@@ -31,9 +37,12 @@ final class AccountController extends Controller
         $this->customers = new CustomerRepository();
         $this->payments = new PaymentRepository();
         $this->provisioning = new ProvisioningRepository();
+        $this->tickets = new TicketRepository();
         $this->auth = new CustomerAuth();
         $this->settings = $this->content->settings();
         $this->whmcs = new WhmcsService($this->settings);
+        $this->accountSync = new CustomerAccountSyncService($this->whmcs, $this->provisioning, $this->settings);
+        $this->dnsProvider = new CloudflareDnsService($this->settings);
     }
 
     public function login(array $errors = [], array $old = []): string
@@ -236,11 +245,13 @@ final class AccountController extends Controller
     {
         $user = $this->requireCustomer();
         $account = $this->fullUser($user);
+        $this->syncAccount($account);
         $invoices = $this->clientInvoices($account, false);
         $payments = $this->accountPaymentOrders($account, 8);
         $domains = $this->accountDomainsForView($account, false);
         $hosting = $this->accountHostingForView($account, false);
         $websiteProjects = $this->accountWebsiteProjects($account);
+        $recentTickets = $this->safeRecentTickets((int) ($account['id'] ?? 0), 3);
 
         return $this->render('account/dashboard', $this->baseData('account-dashboard', [
             'account' => $account,
@@ -248,11 +259,13 @@ final class AccountController extends Controller
             'domains' => $domains,
             'hosting' => $hosting,
             'websiteProjects' => $websiteProjects,
+            'recentTickets' => $recentTickets,
             'recentPayments' => array_slice($payments, 0, 3),
-            'recentActivity' => $this->recentAccountActivity($domains, $hosting, $websiteProjects, $payments),
+            'recentActivity' => $this->recentAccountActivity($domains, $hosting, $websiteProjects, $payments, $recentTickets),
             'domainCount' => count($domains),
             'hostingCount' => count($hosting),
             'websiteProjectCount' => count($websiteProjects),
+            'openTicketCount' => $this->safeOpenTicketCount((int) ($account['id'] ?? 0)),
             'unpaidCount' => count(array_filter($invoices, static fn (array $invoice): bool => in_array(strtolower((string) ($invoice['status'] ?? '')), ['unpaid', 'payment pending'], true))),
         ]));
     }
@@ -260,6 +273,7 @@ final class AccountController extends Controller
     public function domains(): string
     {
         $account = $this->fullUser($this->requireCustomer());
+        $this->syncAccount($account);
 
         return $this->render('account/domains', $this->baseData('account-domains', [
             'account' => $account,
@@ -270,6 +284,7 @@ final class AccountController extends Controller
     public function hosting(): string
     {
         $account = $this->fullUser($this->requireCustomer());
+        $this->syncAccount($account);
 
         return $this->render('account/hosting', $this->baseData('account-hosting', [
             'account' => $account,
@@ -280,6 +295,7 @@ final class AccountController extends Controller
     public function websiteDevelopment(): string
     {
         $account = $this->fullUser($this->requireCustomer());
+        $this->syncAccount($account);
 
         return $this->render('account/website-development', $this->baseData('account-website-development', [
             'account' => $account,
@@ -301,6 +317,7 @@ final class AccountController extends Controller
     public function billing(): string
     {
         $account = $this->fullUser($this->requireCustomer());
+        $this->syncAccount($account);
 
         return $this->render('account/billing', $this->baseData('account-billing', [
             'account' => $account,
@@ -312,10 +329,11 @@ final class AccountController extends Controller
     public function dns(): string
     {
         $account = $this->fullUser($this->requireCustomer());
+        $this->syncAccount($account);
 
         return $this->render('account/dns', $this->baseData('account-dns', [
             'account' => $account,
-            'domains' => array_map([$this, 'accountDomain'], $this->clientDomains($account)),
+            'domains' => $this->accountDomainsForView($account),
         ]));
     }
 
@@ -325,12 +343,287 @@ final class AccountController extends Controller
         $this->redirect(url('/account/dns'));
     }
 
+    public function tickets(): string
+    {
+        $account = $this->fullUser($this->requireCustomer());
+
+        return $this->render('account/tickets', $this->baseData('account-tickets', [
+            'account' => $account,
+            'tickets' => $this->safeTicketsForCustomer((int) ($account['id'] ?? 0)),
+            'openTicketCount' => $this->safeOpenTicketCount((int) ($account['id'] ?? 0)),
+        ]));
+    }
+
+    public function newTicket(array $errors = [], array $old = []): string
+    {
+        $account = $this->fullUser($this->requireCustomer());
+        $old = $old ?: $this->ticketOldFromInput($_GET);
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            if (!Csrf::verify($_POST['_csrf'] ?? null)) {
+                return $this->ticketNewView($account, ['Your security token expired. Please try again.'], $this->ticketOldFromInput($_POST));
+            }
+
+            [$data, $message, $validation] = $this->validateTicketInput($_POST);
+            if ($validation) {
+                $old = $this->ticketOldFromInput($_POST);
+                $old['message'] = (string) ($_POST['message'] ?? '');
+                return $this->ticketNewView($account, $validation, $old);
+            }
+
+            try {
+                $ticket = $this->tickets->createForCustomer($account, $data, $message, $this->ticketAttachments('attachment'));
+                $this->redirect(url('/account/tickets/' . (int) ($ticket['id'] ?? 0) . '?created=1'));
+            } catch (\Throwable $exception) {
+                $this->logAccountIssue('Support ticket could not be created.', [
+                    'customer_id' => (int) ($account['id'] ?? 0),
+                    'type' => get_class($exception),
+                    'message' => $exception->getMessage(),
+                ]);
+                $old = $this->ticketOldFromInput($_POST);
+                $old['message'] = (string) ($_POST['message'] ?? '');
+                $friendly = $exception instanceof \RuntimeException ? $exception->getMessage() : 'Your ticket could not be submitted right now. Please try again shortly.';
+                return $this->ticketNewView($account, [$friendly], $old);
+            }
+        }
+
+        return $this->ticketNewView($account, $errors, $old);
+    }
+
+    public function ticketDetail(string $id, array $errors = []): string
+    {
+        $account = $this->fullUser($this->requireCustomer());
+        try {
+            $ticket = $this->tickets->findForCustomer((int) $id, (int) ($account['id'] ?? 0));
+            if (!$ticket) {
+                $this->redirect(url('/account/tickets'));
+            }
+
+            return $this->render('account/ticket-detail', $this->baseData('account-tickets', [
+                'account' => $account,
+                'ticket' => $ticket,
+                'messages' => $this->tickets->messages((int) $ticket['id']),
+                'attachmentsByMessage' => $this->tickets->attachmentsByMessage((int) $ticket['id']),
+                'errors' => $errors,
+                'created' => (string) ($_GET['created'] ?? '') === '1',
+                'replySaved' => (string) ($_GET['reply'] ?? '') === '1',
+            ]));
+        } catch (\Throwable $exception) {
+            $this->logAccountIssue('Support ticket details could not be loaded.', [
+                'customer_id' => (int) ($account['id'] ?? 0),
+                'ticket_id' => (int) $id,
+                'type' => get_class($exception),
+                'message' => $exception->getMessage(),
+            ]);
+
+            return $this->render('account/tickets', $this->baseData('account-tickets', [
+                'account' => $account,
+                'tickets' => [],
+                'openTicketCount' => 0,
+                'errors' => ['Support ticket details could not be loaded right now. Please try again shortly.'],
+            ]));
+        }
+    }
+
+    public function replyTicket(string $id): string
+    {
+        if (!Csrf::verify($_POST['_csrf'] ?? null)) {
+            return $this->ticketDetail($id, ['Your security token expired. Please try again.']);
+        }
+
+        $account = $this->fullUser($this->requireCustomer());
+        try {
+            $ticket = $this->tickets->findForCustomer((int) $id, (int) ($account['id'] ?? 0));
+            if (!$ticket) {
+                $this->redirect(url('/account/tickets'));
+            }
+        } catch (\Throwable $exception) {
+            $this->logAccountIssue('Support ticket reply lookup failed.', [
+                'customer_id' => (int) ($account['id'] ?? 0),
+                'ticket_id' => (int) $id,
+                'type' => get_class($exception),
+                'message' => $exception->getMessage(),
+            ]);
+            return $this->tickets();
+        }
+
+        $message = trim((string) ($_POST['message'] ?? ''));
+        if (strlen($message) < 3) {
+            return $this->ticketDetail($id, ['Enter a reply before sending.']);
+        }
+
+        try {
+            $this->tickets->addCustomerReply($ticket, $account, $message, $this->ticketAttachments('attachment'));
+            $this->redirect(url('/account/tickets/' . (int) $ticket['id'] . '?reply=1'));
+        } catch (\Throwable $exception) {
+            $this->logAccountIssue('Support ticket reply could not be saved.', [
+                'customer_id' => (int) ($account['id'] ?? 0),
+                'ticket_id' => (int) ($ticket['id'] ?? 0),
+                'type' => get_class($exception),
+                'message' => $exception->getMessage(),
+            ]);
+            $friendly = $exception instanceof \RuntimeException ? $exception->getMessage() : 'Your reply could not be sent right now. Please try again shortly.';
+            return $this->ticketDetail($id, [$friendly]);
+        }
+    }
+
+    public function domainDns(string $domainName, array $errors = [], bool $recordSaved = false, bool $recordDeleted = false, bool $nameserversSaved = false): string
+    {
+        $account = $this->fullUser($this->requireCustomer());
+        $this->syncAccount($account);
+        $owned = $this->ownedDomainByName($account, $domainName);
+        if (!$owned) {
+            $this->redirect(url('/account/domains'));
+        }
+
+        $domain = $this->accountDomain($owned);
+        $domainName = strtolower((string) ($domain['domainname'] ?? $domain['domain'] ?? $domainName));
+        $nameservers = $this->blankNameservers();
+        $domainId = (int) ($domain['id'] ?? $domain['domainid'] ?? 0);
+        if ($domainId > 0) {
+            $loaded = $this->whmcs->nameserversForDomain($domainId);
+            if (!empty($loaded['ok'])) {
+                $nameservers = array_replace($nameservers, $loaded['nameservers'] ?? []);
+            } else {
+                $errors[] = $this->publicDnsMessage((string) ($loaded['message'] ?? ''));
+            }
+        }
+
+        $records = $this->dnsProvider->listRecords($domainName);
+
+        return $this->render('account/dns-manage', $this->baseData('account-dns', [
+            'account' => $account,
+            'domain' => $domain,
+            'domainName' => $domainName,
+            'dnsProviderStatus' => $this->dnsProvider->providerLabel($domainName),
+            'dnsRecordsAvailable' => !empty($records['available']),
+            'dnsRecords' => $records['records'] ?? [],
+            'dnsRecordsMessage' => $records['ok'] ? '' : (string) ($records['message'] ?? 'DNS records could not be loaded right now.'),
+            'nameservers' => $nameservers,
+            'errors' => $errors,
+            'recordSaved' => $recordSaved,
+            'recordDeleted' => $recordDeleted,
+            'nameserversSaved' => $nameserversSaved,
+        ]));
+    }
+
+    public function saveDnsRecord(string $domainName): string
+    {
+        if (!Csrf::verify($_POST['_csrf'] ?? null)) {
+            return $this->domainDns($domainName, ['Your security token expired. Please try again.']);
+        }
+
+        $account = $this->fullUser($this->requireCustomer());
+        $owned = $this->ownedDomainByName($account, $domainName);
+        if (!$owned) {
+            $this->redirect(url('/account/domains'));
+        }
+
+        $domainName = strtolower((string) ($owned['domainname'] ?? $owned['domain'] ?? $domainName));
+        $record = [
+            'type' => $_POST['type'] ?? '',
+            'name' => $_POST['name'] ?? '',
+            'content' => $_POST['content'] ?? '',
+            'target' => $_POST['target'] ?? '',
+            'priority' => $_POST['priority'] ?? '',
+            'weight' => $_POST['weight'] ?? '',
+            'port' => $_POST['port'] ?? '',
+            'service' => $_POST['service'] ?? '',
+            'proto' => $_POST['proto'] ?? '',
+            'flag' => $_POST['flag'] ?? '',
+            'tag' => $_POST['tag'] ?? '',
+            'ttl' => $_POST['ttl'] ?? '3600',
+            'proxied' => (string) ($_POST['proxied'] ?? '0') === '1',
+        ];
+        $saved = $this->dnsProvider->saveRecord($domainName, $record, trim((string) ($_POST['record_id'] ?? '')));
+        if (empty($saved['ok'])) {
+            $this->logAccountIssue('DNS record save failed.', [
+                'customer_id' => (int) ($account['id'] ?? 0),
+                'domain' => $domainName,
+                'type' => (string) ($record['type'] ?? ''),
+                'message' => $saved['message'] ?? '',
+            ]);
+            return $this->domainDns($domainName, [(string) ($saved['message'] ?? 'DNS record could not be saved right now.')]);
+        }
+
+        return $this->domainDns($domainName, [], true);
+    }
+
+    public function deleteDnsRecord(string $domainName, string $recordId): string
+    {
+        if (!Csrf::verify($_POST['_csrf'] ?? null)) {
+            return $this->domainDns($domainName, ['Your security token expired. Please try again.']);
+        }
+
+        $account = $this->fullUser($this->requireCustomer());
+        $owned = $this->ownedDomainByName($account, $domainName);
+        if (!$owned) {
+            $this->redirect(url('/account/domains'));
+        }
+
+        $domainName = strtolower((string) ($owned['domainname'] ?? $owned['domain'] ?? $domainName));
+        $deleted = $this->dnsProvider->deleteRecord($domainName, $recordId);
+        if (empty($deleted['ok'])) {
+            $this->logAccountIssue('DNS record delete failed.', [
+                'customer_id' => (int) ($account['id'] ?? 0),
+                'domain' => $domainName,
+                'record_id' => substr($recordId, 0, 24),
+                'message' => $deleted['message'] ?? '',
+            ]);
+            return $this->domainDns($domainName, [(string) ($deleted['message'] ?? 'DNS record could not be deleted right now.')]);
+        }
+
+        return $this->domainDns($domainName, [], false, true);
+    }
+
+    public function updateDomainNameservers(string $domainName): string
+    {
+        if (!Csrf::verify($_POST['_csrf'] ?? null)) {
+            return $this->domainDns($domainName, ['Your security token expired. Please try again.']);
+        }
+
+        $account = $this->fullUser($this->requireCustomer());
+        $owned = $this->ownedDomainByName($account, $domainName);
+        if (!$owned) {
+            $this->redirect(url('/account/domains'));
+        }
+
+        $domainId = (int) ($owned['id'] ?? $owned['domainid'] ?? 0);
+        if ($domainId <= 0) {
+            return $this->domainDns($domainName, ['Nameserver updates are not available for this domain yet.']);
+        }
+
+        [$nameservers, $errors] = $this->validateNameservers($_POST);
+        if ($errors) {
+            return $this->domainDns($domainName, $errors);
+        }
+
+        $updated = $this->whmcs->updateDomainNameservers($domainId, $nameservers);
+        if (empty($updated['ok'])) {
+            $this->logAccountIssue('Domain nameserver update failed.', [
+                'customer_id' => (int) ($account['id'] ?? 0),
+                'domain_id' => $domainId,
+                'domain' => $domainName,
+                'message' => $updated['message'] ?? '',
+            ]);
+            return $this->domainDns($domainName, [$this->publicDnsMessage((string) ($updated['message'] ?? ''))]);
+        }
+
+        $this->clearCachedWhmcsRead((int) ($account['whmcs_client_id'] ?? 0), 'domains');
+        return $this->domainDns($domainName, [], false, false, true);
+    }
+
     public function manageDns(string $domainId): string
     {
         $account = $this->fullUser($this->requireCustomer());
         $domain = $this->ownedDomain($account, (int) $domainId);
         if (!$domain) {
             $this->redirect(url('/account/dns'));
+        }
+
+        $domainName = (string) ($domain['domainname'] ?? $domain['domain'] ?? '');
+        if ($domainName !== '') {
+            $this->redirect(url('/account/domains/' . rawurlencode(strtolower($domainName)) . '/dns'));
         }
 
         $errors = [];
@@ -480,6 +773,10 @@ final class AccountController extends Controller
 
         $rows = [];
         foreach ($this->clientLiveServices($account, $allowLiveLoad) as $service) {
+            if ($this->accountSync->isWebsiteDevelopmentService($service)) {
+                continue;
+            }
+
             $domain = strtolower(trim((string) ($service['domain'] ?? '')));
             $row = $this->hostingViewRow($service, $localByDomain[$domain] ?? null);
             $key = strtolower($row['package_name'] . ':' . $row['connected_domain']);
@@ -568,7 +865,7 @@ final class AccountController extends Controller
             'nameservers' => $nameservers,
             'registrar_status' => strtolower($status) === 'active' ? 'Registered' : $this->friendlyDomainStatus($status),
             'setup_issue' => '',
-            'dns_url' => $domainId > 0 ? url('/account/dns/' . $domainId) : url('/account/dns'),
+            'dns_url' => $this->dnsUrlForDomain((string) ($domain['domainname'] ?? $domain['domain'] ?? '')),
         ];
     }
 
@@ -589,7 +886,7 @@ final class AccountController extends Controller
             'nameservers' => array_values(array_filter(array_map('strval', $nameservers))),
             'registrar_status' => $this->friendlyLocalProvisioningStatus((string) ($item['payment_status'] ?? ''), (string) ($item['domain_registration_status'] ?? ''), 'Processing'),
             'setup_issue' => (string) ($item['setup_issue_public'] ?? ''),
-            'dns_url' => url('/account/dns'),
+            'dns_url' => $this->dnsUrlForDomain((string) ($item['domain_name'] ?? '')),
         ];
     }
 
@@ -630,7 +927,7 @@ final class AccountController extends Controller
         ];
     }
 
-    private function recentAccountActivity(array $domains, array $hosting, array $projects, array $payments): array
+    private function recentAccountActivity(array $domains, array $hosting, array $projects, array $payments, array $tickets = []): array
     {
         $activity = [];
         foreach ($payments as $payment) {
@@ -676,6 +973,14 @@ final class AccountController extends Controller
                     'date' => (string) ($project['updated_at'] ?? ''),
                 ];
             }
+        }
+
+        foreach ($tickets as $ticket) {
+            $activity[] = [
+                'label' => 'Support ticket updated',
+                'detail' => '#' . (string) ($ticket['public_ref'] ?? $ticket['id'] ?? '') . ' - ' . (string) ($ticket['subject'] ?? 'Ticket'),
+                'date' => (string) ($ticket['updated_at'] ?? $ticket['created_at'] ?? ''),
+            ];
         }
 
         usort($activity, static function (array $left, array $right): int {
@@ -1035,6 +1340,20 @@ final class AccountController extends Controller
         }
     }
 
+    private function syncAccount(array $account): void
+    {
+        try {
+            $this->accountSync->sync($account);
+        } catch (\Throwable $exception) {
+            $this->logAccountIssue('Customer account sync failed.', [
+                'customer_id' => (int) ($account['id'] ?? 0),
+                'whmcs_client_id' => (int) ($account['whmcs_client_id'] ?? 0),
+                'type' => get_class($exception),
+                'message' => $exception->getMessage(),
+            ]);
+        }
+    }
+
     private function configuredAccountWebsitePrice(): float
     {
         $package = $this->content->package();
@@ -1069,7 +1388,7 @@ final class AccountController extends Controller
     {
         $domainId = (int) ($domain['id'] ?? $domain['domainid'] ?? 0);
         $domain['management_url'] = $this->whmcs->domainManagementUrl($domainId);
-        $domain['dns_url'] = $domainId > 0 ? url('/account/dns/' . $domainId) : url('/account/dns');
+        $domain['dns_url'] = $this->dnsUrlForDomain((string) ($domain['domainname'] ?? $domain['domain'] ?? ''));
         return $domain;
     }
 
@@ -1087,6 +1406,51 @@ final class AccountController extends Controller
         }
 
         return null;
+    }
+
+    private function ownedDomainByName(array $account, string $domainName): ?array
+    {
+        $needle = strtolower(trim(rawurldecode($domainName)));
+        $needle = rtrim($needle, '.');
+        if ($needle === '' || !preg_match('/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i', $needle)) {
+            return null;
+        }
+
+        foreach ($this->clientDomains($account) as $domain) {
+            $candidate = strtolower(trim((string) ($domain['domainname'] ?? $domain['domain'] ?? '')));
+            if (rtrim($candidate, '.') === $needle) {
+                return $domain;
+            }
+        }
+
+        foreach ($this->localProvisioningItems($account, 'domain') as $item) {
+            $candidate = strtolower(trim((string) ($item['domain_name'] ?? '')));
+            if (rtrim($candidate, '.') === $needle) {
+                return [
+                    'id' => (int) ($item['whmcs_domain_id'] ?? 0),
+                    'domainid' => (int) ($item['whmcs_domain_id'] ?? 0),
+                    'domainname' => $candidate,
+                    'domain' => $candidate,
+                    'status' => (string) ($item['domain_registration_status'] ?? 'Processing'),
+                    'registrationdate' => (string) ($item['registration_date'] ?? ''),
+                    'expirydate' => (string) ($item['expiry_date'] ?? ''),
+                    'nextduedate' => (string) ($item['renewal_date'] ?? ''),
+                    'recurringamount' => (string) ($item['renewal_amount'] ?? ''),
+                ];
+            }
+        }
+
+        return null;
+    }
+
+    private function dnsUrlForDomain(string $domainName): string
+    {
+        $domainName = strtolower(trim($domainName));
+        if ($domainName === '') {
+            return url('/account/dns');
+        }
+
+        return url('/account/domains/' . rawurlencode($domainName) . '/dns');
     }
 
     private function blankNameservers(): array
@@ -1191,6 +1555,166 @@ final class AccountController extends Controller
         if (is_file($file)) {
             @unlink($file);
         }
+    }
+
+    private function ticketNewView(array $account, array $errors = [], array $old = []): string
+    {
+        return $this->render('account/ticket-new', $this->baseData('account-tickets', [
+            'account' => $account,
+            'errors' => $errors,
+            'old' => $old ?: $this->ticketOldFromInput([]),
+            'departments' => TicketRepository::DEPARTMENTS,
+            'priorities' => TicketRepository::PRIORITIES,
+        ]));
+    }
+
+    private function safeTicketsForCustomer(int $customerId): array
+    {
+        try {
+            return $this->tickets->ticketsForCustomer($customerId);
+        } catch (\Throwable $exception) {
+            $this->logAccountIssue('Support tickets could not be loaded.', [
+                'customer_id' => $customerId,
+                'type' => get_class($exception),
+                'message' => $exception->getMessage(),
+            ]);
+
+            return [];
+        }
+    }
+
+    private function safeRecentTickets(int $customerId, int $limit): array
+    {
+        try {
+            return $this->tickets->recentForCustomer($customerId, $limit);
+        } catch (\Throwable $exception) {
+            $this->logAccountIssue('Recent support tickets could not be loaded.', [
+                'customer_id' => $customerId,
+                'type' => get_class($exception),
+                'message' => $exception->getMessage(),
+            ]);
+
+            return [];
+        }
+    }
+
+    private function safeOpenTicketCount(int $customerId): int
+    {
+        try {
+            return $this->tickets->openCountForCustomer($customerId);
+        } catch (\Throwable $exception) {
+            $this->logAccountIssue('Open support ticket count could not be loaded.', [
+                'customer_id' => $customerId,
+                'type' => get_class($exception),
+                'message' => $exception->getMessage(),
+            ]);
+
+            return 0;
+        }
+    }
+
+    private function ticketOldFromInput(array $input): array
+    {
+        $department = trim((string) ($input['department'] ?? ''));
+        $priority = trim((string) ($input['priority'] ?? ''));
+
+        return [
+            'subject' => trim((string) ($input['subject'] ?? '')),
+            'department' => in_array($department, TicketRepository::DEPARTMENTS, true) ? $department : 'General Support',
+            'priority' => in_array($priority, TicketRepository::PRIORITIES, true) ? $priority : 'Medium',
+            'related_type' => trim((string) ($input['related_type'] ?? '')),
+            'related_label' => trim((string) ($input['related_label'] ?? '')),
+            'related_reference' => trim((string) ($input['related_reference'] ?? '')),
+            'message' => trim((string) ($input['message'] ?? '')),
+        ];
+    }
+
+    private function validateTicketInput(array $input): array
+    {
+        $old = $this->ticketOldFromInput($input);
+        $message = trim((string) ($input['message'] ?? ''));
+        $errors = [];
+
+        if (strlen($old['subject']) < 4) {
+            $errors[] = 'Enter a short subject for your ticket.';
+        }
+        if (strlen($message) < 10) {
+            $errors[] = 'Tell us a little more about what you need help with.';
+        }
+
+        return [
+            [
+                'subject' => substr($old['subject'], 0, 190),
+                'department' => $old['department'],
+                'priority' => $old['priority'],
+                'related_type' => substr($old['related_type'], 0, 40),
+                'related_label' => substr($old['related_label'], 0, 190),
+                'related_reference' => substr($old['related_reference'], 0, 190),
+            ],
+            substr($message, 0, 10000),
+            $errors,
+        ];
+    }
+
+    private function ticketAttachments(string $field): array
+    {
+        if (empty($_FILES[$field]) || ($_FILES[$field]['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
+            return [];
+        }
+
+        $file = $_FILES[$field];
+        if (is_array($file['name'] ?? null)) {
+            return [];
+        }
+
+        if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+            throw new \RuntimeException('Attachment upload failed. Please try again.');
+        }
+
+        $size = (int) ($file['size'] ?? 0);
+        if ($size <= 0 || $size > 5 * 1024 * 1024) {
+            throw new \RuntimeException('Attachments must be smaller than 5MB.');
+        }
+
+        $original = basename((string) ($file['name'] ?? 'attachment'));
+        $extension = strtolower(pathinfo($original, PATHINFO_EXTENSION));
+        $allowed = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'pdf', 'txt', 'doc', 'docx'];
+        if (!in_array($extension, $allowed, true)) {
+            throw new \RuntimeException('Use JPG, PNG, WebP, GIF, PDF, TXT, DOC, or DOCX attachments.');
+        }
+
+        $folder = 'uploads/tickets/' . date('Y/m');
+        $targetDir = BASE_PATH . '/' . $folder;
+        if (!is_dir($targetDir) && !mkdir($targetDir, 0755, true) && !is_dir($targetDir)) {
+            throw new \RuntimeException('Attachment upload is temporarily unavailable.');
+        }
+
+        $storedName = bin2hex(random_bytes(12)) . '.' . $extension;
+        $target = $targetDir . '/' . $storedName;
+        if (!move_uploaded_file((string) ($file['tmp_name'] ?? ''), $target)) {
+            throw new \RuntimeException('Attachment could not be saved.');
+        }
+
+        return [[
+            'original_name' => $original,
+            'stored_path' => $folder . '/' . $storedName,
+            'mime_type' => $this->mimeType($target),
+            'file_size' => $size,
+        ]];
+    }
+
+    private function mimeType(string $path): string
+    {
+        if (function_exists('mime_content_type')) {
+            return (string) mime_content_type($path);
+        }
+
+        if (class_exists(\finfo::class)) {
+            $info = new \finfo(FILEINFO_MIME_TYPE);
+            return (string) $info->file($path);
+        }
+
+        return '';
     }
 
     private function safeRecentPayments(int $customerId, int $limit): array

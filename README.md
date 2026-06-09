@@ -1,6 +1,6 @@
 # Planetic Solutions Website
 
-Production-ready plain PHP/MySQL website for Planetic Solutions with a responsive hosting-company frontend, main-site checkout, on-site Stripe invoice payment, customer account pages, WHMCS-backed orders/domains/provisioning, SEO controls, blog, editable legal pages, contact inquiry storage and a secure admin CMS.
+Production-ready plain PHP/MySQL website for Planetic Solutions with a responsive hosting-company frontend, main-site checkout, on-site Stripe invoice payment, customer account pages, WHMCS-backed orders/domains/provisioning, DNS tools, local support tickets, SEO controls, blog, editable legal pages, contact inquiry storage and a secure admin CMS.
 
 ## Requirements
 
@@ -14,7 +14,7 @@ Production-ready plain PHP/MySQL website for Planetic Solutions with a responsiv
 1. Upload the project files to your cPanel site folder, usually `public_html`.
 2. Make sure `.htaccess` is uploaded. It protects `app/`, `database/`, `storage/` and `.env`.
 3. Create a MySQL database and user in cPanel.
-4. Import `database/schema.sql` into the database using phpMyAdmin. If you already imported an earlier version, back up your database and import `database/stripe_account_update.sql` for the Stripe/account tables; import `database/redesign_update.sql` only if you also want the latest content defaults.
+4. Import `database/schema.sql` into the database using phpMyAdmin. If you already imported an earlier version, back up your database and import `database/stripe_account_update.sql`, `database/customer_order_checkout_metadata.sql`, `database/provisioning_and_website_projects.sql` and `database/account_dns_tickets_update.sql`; import `database/redesign_update.sql` only if you also want the latest content defaults.
 5. Edit `.env` with your database credentials:
 
 ```env
@@ -69,6 +69,7 @@ WHMCS_BUSINESS_HOSTING_PID=2
 WHMCS_WORDPRESS_HOSTING_PID=3
 WHMCS_RESELLER_HOSTING_PID=4
 WHMCS_WEBSITE_PACKAGE_PID=5
+WEBSITE_DEVELOPMENT_PRODUCT_IDS=5
 WHMCS_DOMAIN_REGISTRAR=
 WHMCS_STARTER_WHM_PACKAGE=planetic_starter
 WHMCS_BUSINESS_WHM_PACKAGE=planetic_business
@@ -76,6 +77,9 @@ WHMCS_PRO_WHM_PACKAGE=planetic_pro
 WHMCS_AGENCY_WHM_PACKAGE=planetic_agency
 WHMCS_ECOMMERCE_WHM_PACKAGE=planetic_agency
 WHMCS_WEBSITE_PRICE_OVERRIDE=199.00
+CLOUDFLARE_ZONE_ID=
+CLOUDFLARE_ZONE_MAP=
+CLOUDFLARE_API_TOKEN=
 STRIPE_PUBLISHABLE_KEY=
 STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
@@ -118,7 +122,7 @@ Domain-only, hosting-only, domain + hosting and website package buttons now send
 
 `/checkout`
 
-The checkout page creates or finds the WHMCS client, calls `AddOrder`, stores the returned invoice locally, creates pending local purchase/provisioning records, and keeps the customer on the Planetic Solutions website for Stripe Payment Element checkout. WHMCS remains the backend for invoices, domains, service records, provisioning, renewals and support.
+The checkout page creates or finds the WHMCS client, calls `AddOrder`, stores the returned invoice locally, creates pending local purchase/provisioning records, and keeps the customer on the Planetic Solutions website for Stripe Payment Element checkout. WHMCS remains the backend for invoices, domains, service records, provisioning and renewals. Support tickets are stored locally in this app unless a WHMCS ticket bridge is added later.
 
 ## Stripe On-Site Payment
 
@@ -154,6 +158,14 @@ The local WHM package labels are mapped as Starter `planetic_starter`, Business 
 
 Full setup notes are in `docs/main-site-checkout.md`.
 
+## Customer Account, DNS and Tickets
+
+The customer account sync reads WHMCS domains, invoices and products for the logged-in client, then mirrors paid hosting services and website development purchases into local account views. It does not create duplicate WHMCS orders during account browsing.
+
+DNS management is available at `/account/domains/{domain}/dns`. Nameserver updates use WHMCS domain APIs. DNS record create/update/delete uses Cloudflare when `CLOUDFLARE_API_TOKEN` and either `CLOUDFLARE_ZONE_ID` or `CLOUDFLARE_ZONE_MAP` are configured. If no DNS provider is connected, customers see a friendly unavailable message and can still open a support ticket.
+
+Local support tickets are available from `/account/tickets` and Admin > Support Tickets. Customers can open/reply to tickets, admins can reply/update status, and optional attachments are stored under `uploads/tickets/`.
+
 ## Domain Pricing
 
 Live domain checkout pricing should remain controlled inside WHMCS. The `/domain-search` results page reads live prices for `.com`, `.net`, `.org`, `.co.uk`, `.xyz` and `.online` from WHMCS `GetTLDPricing`. The website also has editable TLD display cards for marketing sections; update those manually in Admin > Domains/TLDs when needed.
@@ -165,6 +177,7 @@ Live domain checkout pricing should remain controlled inside WHMCS. The `/domain
 - Customer accounts, domains, hosting, local invoice/payment mappings, provisioning records and Stripe webhook event tracking tables
 - £199 website development package
 - Website project progress management with private internal notes and customer-facing notes
+- Local support ticket inbox with customer/admin replies and attachments
 - TLD display prices and domain URLs
 - About and legal pages
 - Blog posts with slug, category, metadata, featured image, alt text and status
@@ -203,7 +216,7 @@ Option 1: cPanel Git Version Control
 2. In cPanel, open Git Version Control and clone the repository into your site folder.
 3. Copy `.env.example` to `.env` if needed and fill in production values.
 4. Import `database/schema.sql`.
-   - If you already imported an earlier version, import `database/stripe_account_update.sql`, `database/customer_order_checkout_metadata.sql` and `database/provisioning_and_website_projects.sql` after backing up your database.
+   - If you already imported an earlier version, import `database/stripe_account_update.sql`, `database/customer_order_checkout_metadata.sql`, `database/provisioning_and_website_projects.sql` and `database/account_dns_tickets_update.sql` after backing up your database.
    - If you also want the latest content defaults, import `database/redesign_update.sql`.
 5. Pull future changes from cPanel Git Version Control.
 
@@ -213,7 +226,7 @@ Option 2: Manual deploy
 2. Upload through cPanel File Manager.
 3. Extract into `public_html`.
 4. Edit `.env`.
-5. Import `database/schema.sql`, or import `database/stripe_account_update.sql`, `database/customer_order_checkout_metadata.sql` and `database/provisioning_and_website_projects.sql` for an existing installation.
+5. Import `database/schema.sql`, or import `database/stripe_account_update.sql`, `database/customer_order_checkout_metadata.sql`, `database/provisioning_and_website_projects.sql` and `database/account_dns_tickets_update.sql` for an existing installation.
 
 ## Security Notes
 
@@ -226,6 +239,7 @@ Option 2: Manual deploy
 - Stripe webhook event IDs are stored to prevent duplicate processing.
 - Domains and hosting are not provisioned before verified payment.
 - Uploaded images are validated with `getimagesize()` and extension checks.
+- Ticket attachments are restricted by extension and size, then stored server-side under `uploads/tickets/`.
 - Contact form entries are escaped on output.
 - Rich page/blog/FAQ HTML is filtered to a safe allowlist before saving.
 
@@ -243,6 +257,7 @@ assets/
   js/app.js
 database/schema.sql
 database/stripe_account_update.sql
+database/account_dns_tickets_update.sql
 uploads/
 .env
 .htaccess

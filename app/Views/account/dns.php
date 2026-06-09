@@ -13,7 +13,7 @@
                     <h2>Nameserver tools</h2>
                     <p>Choose a domain below to update the nameservers used by your hosting, website or DNS provider.</p>
                 </div>
-                <a class="btn btn-outline" href="<?= e(url('/contact')) ?>">Need Help?</a>
+                <a class="btn btn-outline" href="<?= e(url('/account/tickets/new?department=Domain%20Support&subject=DNS%20support%20request')) ?>">Open Ticket</a>
             </section>
 
             <section class="account-card">
@@ -28,9 +28,9 @@
                     <div class="account-list">
                         <?php foreach ($domains as $domain): ?>
                             <?php
-                            $domainName = (string) ($domain['domainname'] ?? $domain['domain'] ?? 'Domain');
-                            $renewal = (string) ($domain['nextduedate'] ?? 'Not available');
-                            $status = (string) ($domain['status'] ?? 'Processing');
+                            $domainName = (string) ($domain['domain_name'] ?? $domain['domainname'] ?? $domain['domain'] ?? 'Domain');
+                            $renewal = (string) ($domain['renewal_date'] ?? $domain['nextduedate'] ?? 'Not available');
+                            $status = (string) ($domain['registration_status'] ?? $domain['status'] ?? 'Processing');
                             $dnsUrl = (string) ($domain['dns_url'] ?? url('/account/dns'));
                             ?>
                             <div class="account-row">
@@ -53,7 +53,7 @@
             <section class="account-card dns-support-card">
                 <h2>Need help with DNS?</h2>
                 <p>Contact support if you want us to connect your domain to hosting, email, Cloudflare, or a new website launch.</p>
-                <a class="btn btn-outline" href="<?= e(url('/contact')) ?>">Contact Support</a>
+                <a class="btn btn-outline" href="<?= e(url('/account/tickets/new?department=Domain%20Support&subject=DNS%20support%20request')) ?>">Open Ticket</a>
             </section>
         </main>
     </div>

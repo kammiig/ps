@@ -6,6 +6,7 @@
                 <span class="section-kicker">Website Development</span>
                 <h1>Website development</h1>
                 <p>Follow purchased website packages, onboarding and project progress.</p>
+                <a class="btn btn-outline btn-small" href="<?= e(url('/account/tickets/new?department=Website%20Development&subject=Website%20development%20support%20request')) ?>">Open Ticket</a>
             </div>
 
             <section class="account-card">
@@ -30,7 +31,7 @@
                                         <div><dt>Completion date</dt><dd><?= e(substr((string) $project['completed_at'], 0, 10)) ?></dd></div>
                                     <?php endif; ?>
                                 </dl>
-                                <a class="btn btn-outline btn-small" href="<?= e(url('/contact')) ?>">Contact Support</a>
+                                <a class="btn btn-outline btn-small" href="<?= e(url('/account/tickets/new?department=Website%20Development&subject=' . rawurlencode('Help with ' . (string) ($project['package_name'] ?? 'website project')) . '&related_type=website_project&related_label=' . rawurlencode((string) ($project['package_name'] ?? 'Website Development')) . '&related_reference=' . rawurlencode((string) ($project['id'] ?? '')))) ?>">Open Ticket</a>
                             </article>
                         <?php endforeach; ?>
                     </div>

@@ -6,6 +6,7 @@
                 <span class="section-kicker">Hosting</span>
                 <h1>Your hosting</h1>
                 <p>View hosting packages, connected domains, renewal details and setup progress.</p>
+                <a class="btn btn-outline btn-small" href="<?= e(url('/account/tickets/new?department=Hosting%20Support&subject=Hosting%20support%20request')) ?>">Open Ticket</a>
             </div>
 
             <section class="account-card">
@@ -29,6 +30,7 @@
                                 <?php if (!empty($service['cpanel_url'])): ?>
                                     <a class="btn btn-outline btn-small" href="<?= e($service['cpanel_url']) ?>" rel="noopener">Open cPanel</a>
                                 <?php endif; ?>
+                                <a class="btn btn-outline btn-small" href="<?= e(url('/account/tickets/new?department=Hosting%20Support&subject=' . rawurlencode('Help with ' . (string) ($service['package_name'] ?? 'hosting')) . '&related_type=hosting&related_label=' . rawurlencode((string) ($service['package_name'] ?? 'Hosting Package')))) ?>">Open Ticket</a>
                             </article>
                         <?php endforeach; ?>
                     </div>

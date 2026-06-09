@@ -6,6 +6,7 @@
                 <span class="section-kicker">Domains</span>
                 <h1>Your domains</h1>
                 <p>Track registrations, renewals and nameservers for domains purchased through Planetic Solutions.</p>
+                <a class="btn btn-outline btn-small" href="<?= e(url('/account/tickets/new?department=Domain%20Support&subject=Domain%20support%20request')) ?>">Open Ticket</a>
             </div>
 
             <section class="account-card">
@@ -35,7 +36,10 @@
                                         <span>Not available yet</span>
                                     <?php endif; ?>
                                 </div>
-                                <a class="btn btn-outline btn-small" href="<?= e($domain['dns_url'] ?? url('/account/dns')) ?>">Manage DNS</a>
+                                <div class="account-row-actions">
+                                    <a class="btn btn-outline btn-small" href="<?= e($domain['dns_url'] ?? url('/account/dns')) ?>">Manage DNS</a>
+                                    <a class="btn btn-outline btn-small" href="<?= e(url('/account/tickets/new?department=Domain%20Support&subject=' . rawurlencode('Help with ' . (string) ($domain['domain_name'] ?? 'domain')) . '&related_type=domain&related_label=' . rawurlencode((string) ($domain['domain_name'] ?? 'Domain')))) ?>">Open Ticket</a>
+                                </div>
                             </article>
                         <?php endforeach; ?>
                     </div>

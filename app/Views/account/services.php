@@ -6,6 +6,7 @@
                 <span class="section-kicker">Services</span>
                 <h1>Your services</h1>
                 <p>View hosting packages and domains connected to your Planetic Solutions account.</p>
+                <a class="btn btn-outline btn-small" href="<?= e(url('/account/tickets/new')) ?>">Open Ticket</a>
             </div>
 
             <section class="account-card">
@@ -43,7 +44,7 @@
                                 <div><strong><?= e($domain['domainname'] ?? $domain['domain'] ?? 'Domain') ?></strong><span>Renewal: <?= e($domain['nextduedate'] ?? 'Not available') ?></span></div>
                                 <div class="account-row-actions">
                                     <span class="status-pill"><?= e($domain['status'] ?? 'Processing') ?></span>
-                                    <a class="btn btn-outline btn-small" href="<?= e(url('/account/dns')) ?>">Manage DNS</a>
+                                    <a class="btn btn-outline btn-small" href="<?= e($domain['dns_url'] ?? url('/account/dns')) ?>">Manage DNS</a>
                                 </div>
                             </div>
                         <?php endforeach; ?>
