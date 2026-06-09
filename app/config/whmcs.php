@@ -12,6 +12,7 @@ return [
     'local_bridge_url' => env('WHMCS_LOCAL_API_BRIDGE_URL', ''),
     'local_bridge_token' => env('WHMCS_LOCAL_API_BRIDGE_TOKEN', ''),
     'payment_method' => env('WHMCS_PAYMENT_METHOD', 'stripe'),
+    'domain_registrar' => env('WHMCS_DOMAIN_REGISTRAR', ''),
     'use_price_override' => filter_var(env('WHMCS_USE_PRICE_OVERRIDE', false), FILTER_VALIDATE_BOOLEAN),
     'currency_id' => (int) env('WHMCS_CURRENCY_ID', 1),
     'default_billing_cycle' => env('WHMCS_DEFAULT_BILLING_CYCLE', 'monthly'),
@@ -26,18 +27,37 @@ return [
         'starter-hosting' => [
             'pid' => (int) env('WHMCS_STARTER_HOSTING_PID', 1),
             'billing_cycle' => env('WHMCS_STARTER_BILLING_CYCLE', 'monthly'),
+            'whm_package' => env('WHMCS_STARTER_WHM_PACKAGE', 'planetic_starter'),
         ],
         'business-hosting' => [
             'pid' => (int) env('WHMCS_BUSINESS_HOSTING_PID', 2),
             'billing_cycle' => env('WHMCS_BUSINESS_BILLING_CYCLE', 'monthly'),
+            'whm_package' => env('WHMCS_BUSINESS_WHM_PACKAGE', 'planetic_business'),
+        ],
+        'pro-hosting' => [
+            'pid' => (int) env('WHMCS_PRO_HOSTING_PID', 3),
+            'billing_cycle' => env('WHMCS_PRO_BILLING_CYCLE', 'monthly'),
+            'whm_package' => env('WHMCS_PRO_WHM_PACKAGE', 'planetic_pro'),
+        ],
+        'agency-hosting' => [
+            'pid' => (int) env('WHMCS_AGENCY_HOSTING_PID', 4),
+            'billing_cycle' => env('WHMCS_AGENCY_BILLING_CYCLE', 'monthly'),
+            'whm_package' => env('WHMCS_AGENCY_WHM_PACKAGE', 'planetic_agency'),
+        ],
+        'ecommerce-hosting' => [
+            'pid' => (int) env('WHMCS_ECOMMERCE_HOSTING_PID', 4),
+            'billing_cycle' => env('WHMCS_ECOMMERCE_BILLING_CYCLE', 'monthly'),
+            'whm_package' => env('WHMCS_ECOMMERCE_WHM_PACKAGE', 'planetic_agency'),
         ],
         'wordpress-hosting-plan' => [
             'pid' => (int) env('WHMCS_WORDPRESS_HOSTING_PID', 3),
             'billing_cycle' => env('WHMCS_WORDPRESS_BILLING_CYCLE', 'monthly'),
+            'whm_package' => env('WHMCS_WORDPRESS_WHM_PACKAGE', 'planetic_pro'),
         ],
         'reseller-hosting-plan' => [
             'pid' => (int) env('WHMCS_RESELLER_HOSTING_PID', 4),
             'billing_cycle' => env('WHMCS_RESELLER_BILLING_CYCLE', 'monthly'),
+            'whm_package' => env('WHMCS_RESELLER_WHM_PACKAGE', 'planetic_agency'),
         ],
     ],
     'website_package' => [

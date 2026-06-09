@@ -45,6 +45,7 @@ $allowedActions = [
     'AddInvoicePayment',
     'AcceptOrder',
     'ModuleCreate',
+    'DomainRegister',
     'CreateSsoToken',
     'GetInvoice',
     'GetInvoices',

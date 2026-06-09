@@ -69,6 +69,12 @@ WHMCS_BUSINESS_HOSTING_PID=2
 WHMCS_WORDPRESS_HOSTING_PID=3
 WHMCS_RESELLER_HOSTING_PID=4
 WHMCS_WEBSITE_PACKAGE_PID=5
+WHMCS_DOMAIN_REGISTRAR=
+WHMCS_STARTER_WHM_PACKAGE=planetic_starter
+WHMCS_BUSINESS_WHM_PACKAGE=planetic_business
+WHMCS_PRO_WHM_PACKAGE=planetic_pro
+WHMCS_AGENCY_WHM_PACKAGE=planetic_agency
+WHMCS_ECOMMERCE_WHM_PACKAGE=planetic_agency
 WHMCS_WEBSITE_PRICE_OVERRIDE=199.00
 STRIPE_PUBLISHABLE_KEY=
 STRIPE_SECRET_KEY=
@@ -112,7 +118,7 @@ Domain-only, hosting-only, domain + hosting and website package buttons now send
 
 `/checkout`
 
-The checkout page creates or finds the WHMCS client, calls `AddOrder`, stores the returned invoice locally, and keeps the customer on the Planetic Solutions website for Stripe Payment Element checkout. WHMCS remains the backend for invoices, domains, service records, provisioning, renewals and support.
+The checkout page creates or finds the WHMCS client, calls `AddOrder`, stores the returned invoice locally, creates pending local purchase/provisioning records, and keeps the customer on the Planetic Solutions website for Stripe Payment Element checkout. WHMCS remains the backend for invoices, domains, service records, provisioning, renewals and support.
 
 ## Stripe On-Site Payment
 
@@ -136,11 +142,15 @@ Enable these Stripe webhook events:
 
 The webhook verifies Stripe signatures, validates amount/currency against the saved invoice mapping, then records successful payments in WHMCS with `AddInvoicePayment`. Frontend redirects do not mark invoices as paid.
 
+After WHMCS confirms the invoice is paid, the site accepts the WHMCS order, requests registrar submission for domain purchases, requests hosting account creation for paid hosting services, and creates/updates website development project records. Duplicate Stripe webhook events are stored and ignored after processing.
+
 Hosting and website package product IDs can be updated in:
 
 - `.env`
 - `app/config/whmcs.php`
 - Admin > Hosting Plans, where existing WHMCS product URLs are still used as a PID fallback
+
+The local WHM package labels are mapped as Starter `planetic_starter`, Business `planetic_business`, Pro `planetic_pro`, and Agency/Ecommerce `planetic_agency`. The actual cPanel package assignment still needs to be confirmed inside each WHMCS product/module setting.
 
 Full setup notes are in `docs/main-site-checkout.md`.
 
@@ -152,8 +162,9 @@ Live domain checkout pricing should remain controlled inside WHMCS. The `/domain
 
 - Homepage hero, CTAs, service cards, trust badges and feature sections
 - Hosting plans with prices, features, WHMCS product mapping and highlighted badges
-- Customer accounts, local invoice/payment mappings and Stripe webhook event tracking tables
+- Customer accounts, domains, hosting, local invoice/payment mappings, provisioning records and Stripe webhook event tracking tables
 - £199 website development package
+- Website project progress management with private internal notes and customer-facing notes
 - TLD display prices and domain URLs
 - About and legal pages
 - Blog posts with slug, category, metadata, featured image, alt text and status
@@ -192,7 +203,7 @@ Option 1: cPanel Git Version Control
 2. In cPanel, open Git Version Control and clone the repository into your site folder.
 3. Copy `.env.example` to `.env` if needed and fill in production values.
 4. Import `database/schema.sql`.
-   - If you already imported an earlier version, import `database/stripe_account_update.sql` after backing up your database.
+   - If you already imported an earlier version, import `database/stripe_account_update.sql`, `database/customer_order_checkout_metadata.sql` and `database/provisioning_and_website_projects.sql` after backing up your database.
    - If you also want the latest content defaults, import `database/redesign_update.sql`.
 5. Pull future changes from cPanel Git Version Control.
 
@@ -202,7 +213,7 @@ Option 2: Manual deploy
 2. Upload through cPanel File Manager.
 3. Extract into `public_html`.
 4. Edit `.env`.
-5. Import `database/schema.sql`, or import `database/stripe_account_update.sql` for an existing installation.
+5. Import `database/schema.sql`, or import `database/stripe_account_update.sql`, `database/customer_order_checkout_metadata.sql` and `database/provisioning_and_website_projects.sql` for an existing installation.
 
 ## Security Notes
 
@@ -213,6 +224,7 @@ Option 2: Manual deploy
 - Database queries use PDO prepared statements.
 - Stripe secret and webhook keys remain server-side; card details are handled by Stripe and are never stored by the application.
 - Stripe webhook event IDs are stored to prevent duplicate processing.
+- Domains and hosting are not provisioned before verified payment.
 - Uploaded images are validated with `getimagesize()` and extension checks.
 - Contact form entries are escaped on output.
 - Rich page/blog/FAQ HTML is filtered to a safe allowlist before saving.

@@ -9,16 +9,19 @@ use App\Core\Controller;
 use App\Core\Csrf;
 use App\Core\Upload;
 use App\Models\ContentRepository;
+use App\Models\ProvisioningRepository;
 
 final class AdminController extends Controller
 {
     private Auth $auth;
     private ContentRepository $content;
+    private ProvisioningRepository $provisioning;
 
     public function __construct()
     {
         $this->auth = new Auth();
         $this->content = new ContentRepository();
+        $this->provisioning = new ProvisioningRepository();
     }
 
     public function login(): string
@@ -73,7 +76,7 @@ final class AdminController extends Controller
                     'company_name', 'tagline', 'app_url', 'logo_url', 'favicon_url', 'og_image',
                     'admin_email', 'mail_from', 'phone', 'whatsapp_number', 'address',
                     'facebook_url', 'instagram_url', 'linkedin_url', 'x_url',
-                    'whmcs_client_area_url', 'whmcs_api_url', 'whmcs_api_identifier', 'whmcs_api_secret', 'whmcs_payment_method', 'whmcs_payment_gateway_name', 'domain_hosting_pid',
+                    'whmcs_client_area_url', 'whmcs_api_url', 'whmcs_api_identifier', 'whmcs_api_secret', 'whmcs_payment_method', 'whmcs_payment_gateway_name', 'whmcs_domain_registrar', 'domain_hosting_pid',
                     'google_analytics', 'recaptcha_site_key', 'recaptcha_secret_key',
                     'cloudflare_zone_id', 'cloudflare_api_token', 'default_order_url',
                 ]);
@@ -120,6 +123,7 @@ final class AdminController extends Controller
                 ['name' => 'whmcs_api_secret', 'label' => 'WHMCS API Secret', 'type' => 'password'],
                 ['name' => 'whmcs_payment_method', 'label' => 'WHMCS Payment Method System Name', 'type' => 'text'],
                 ['name' => 'whmcs_payment_gateway_name', 'label' => 'WHMCS Gateway Name for Stripe Invoice Payments', 'type' => 'text'],
+                ['name' => 'whmcs_domain_registrar', 'label' => 'WHMCS Registrar Module Name', 'type' => 'text'],
                 ['name' => 'domain_hosting_pid', 'label' => 'Domain + Hosting Product ID', 'type' => 'text'],
                 ['name' => 'default_order_url', 'label' => 'Default Get Started URL', 'type' => 'url'],
                 ['name' => 'google_analytics', 'label' => 'Google Analytics / Tracking Code', 'type' => 'textarea'],
@@ -215,6 +219,66 @@ final class AdminController extends Controller
                 ['name' => 'cta_url', 'label' => 'Package CTA URL', 'type' => 'url'],
                 ['name' => 'inquiry_mode', 'label' => 'Use inquiry/contact flow instead of direct checkout', 'type' => 'checkbox'],
                 ['name' => 'is_active', 'label' => 'Active', 'type' => 'checkbox'],
+            ],
+        ]);
+    }
+
+    public function websiteProjects(): string
+    {
+        $this->requireAuth();
+
+        return $this->adminRender('admin/website-projects', [
+            'title' => 'Website Projects',
+            'projects' => $this->provisioning->websiteProjectsForAdmin(),
+        ]);
+    }
+
+    public function websiteProjectForm(string $id): string
+    {
+        $this->requireAuth();
+        $project = $this->provisioning->websiteProject((int) $id);
+        if (!$project) {
+            $this->flash('Website project was not found.', 'error');
+            $this->redirect(url('/admin/website-projects'));
+        }
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            $this->verifyCsrf();
+            $this->provisioning->updateWebsiteProject((int) $id, [
+                'project_status' => trim((string) ($_POST['project_status'] ?? '')),
+                'onboarding_status' => trim((string) ($_POST['onboarding_status'] ?? '')),
+                'customer_note' => trim((string) ($_POST['customer_note'] ?? '')),
+                'internal_notes' => trim((string) ($_POST['internal_notes'] ?? '')),
+                'estimated_next_step' => trim((string) ($_POST['estimated_next_step'] ?? '')),
+                'completed_at' => trim((string) ($_POST['completed_at'] ?? '')),
+                'delivered_at' => trim((string) ($_POST['delivered_at'] ?? '')),
+            ]);
+            $this->flash('Website project updated.');
+            $this->redirect(url('/admin/website-projects'));
+        }
+
+        $statusOptions = array_combine(ProvisioningRepository::WEBSITE_STATUSES, ProvisioningRepository::WEBSITE_STATUSES);
+
+        return $this->adminRender('admin/form', [
+            'title' => 'Update Website Project',
+            'subtitle' => trim((string) ($project['customer_name'] ?? '')) . ' - Invoice #' . (int) ($project['whmcs_invoice_id'] ?? 0),
+            'action' => url('/admin/website-projects/' . (int) $id . '/edit'),
+            'values' => [
+                ...$project,
+                'completed_at' => !empty($project['completed_at']) ? substr((string) $project['completed_at'], 0, 19) : '',
+                'delivered_at' => !empty($project['delivered_at']) ? substr((string) $project['delivered_at'], 0, 19) : '',
+            ],
+            'fields' => [
+                ['name' => 'package_name', 'label' => 'Package', 'type' => 'text', 'readonly' => true],
+                ['name' => 'customer_email', 'label' => 'Customer Email', 'type' => 'text', 'readonly' => true],
+                ['name' => 'domain_name', 'label' => 'Included Domain', 'type' => 'text', 'readonly' => true],
+                ['name' => 'project_status', 'label' => 'Project Status', 'type' => 'select', 'options' => $statusOptions],
+                ['name' => 'onboarding_status', 'label' => 'Onboarding Status', 'type' => 'text'],
+                ['name' => 'estimated_next_step', 'label' => 'Estimated Next Step', 'type' => 'text'],
+                ['name' => 'customer_note', 'label' => 'Customer-Facing Note', 'type' => 'textarea', 'rows' => 5],
+                ['name' => 'internal_notes', 'label' => 'Internal Notes', 'type' => 'textarea', 'rows' => 6],
+                ['name' => 'completed_at', 'label' => 'Completion Date (YYYY-MM-DD HH:MM:SS)', 'type' => 'text'],
+                ['name' => 'delivered_at', 'label' => 'Delivery Date (YYYY-MM-DD HH:MM:SS)', 'type' => 'text'],
             ],
         ]);
     }
@@ -687,7 +751,7 @@ final class AdminController extends Controller
     public function export(): string
     {
         $this->requireAuth();
-        $tables = ['settings', 'seo_settings', 'hosting_plans', 'domain_tlds', 'website_packages', 'pages', 'testimonials', 'faqs', 'blog_categories', 'blog_posts', 'inquiries', 'customer_users', 'customer_orders', 'stripe_webhook_events'];
+        $tables = ['settings', 'seo_settings', 'hosting_plans', 'domain_tlds', 'website_packages', 'pages', 'testimonials', 'faqs', 'blog_categories', 'blog_posts', 'inquiries', 'customer_users', 'customer_orders', 'customer_provisioning_items', 'website_projects', 'stripe_webhook_events'];
         $backup = [
             'generated_at' => date('c'),
             'site' => $this->content->settings()['company_name'] ?? 'Planetic Solutions',
@@ -695,7 +759,11 @@ final class AdminController extends Controller
         ];
 
         foreach ($tables as $table) {
-            $backup['tables'][$table] = $this->content->db()->query("SELECT * FROM {$table}")->fetchAll();
+            try {
+                $backup['tables'][$table] = $this->content->db()->query("SELECT * FROM {$table}")->fetchAll();
+            } catch (\Throwable) {
+                $backup['tables'][$table] = [];
+            }
         }
 
         header('Content-Type: application/json; charset=UTF-8');

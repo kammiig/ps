@@ -10,7 +10,7 @@
             <?php if ($order['payment_status'] === 'paid'): ?>
                 <span class="result-badge" data-payment-badge>Paid</span>
                 <h1 data-payment-title>Payment Confirmed</h1>
-                <p data-payment-message>Your payment has been confirmed and recorded on your invoice.</p>
+                <p data-payment-message>Your payment has been confirmed. Any purchased domain, hosting or website package is now being prepared in your account.</p>
             <?php else: ?>
                 <span class="result-badge muted" data-payment-badge>Confirming</span>
                 <h1 data-payment-title>Your payment is being confirmed</h1>

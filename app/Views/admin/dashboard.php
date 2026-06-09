@@ -7,6 +7,7 @@
 
 <section class="admin-stats">
     <article><span><?= e($counts['plans']) ?></span><strong>Hosting plans</strong></article>
+    <article><span><?= e($counts['website_projects'] ?? 0) ?></span><strong>Website projects</strong></article>
     <article><span><?= e($counts['posts']) ?></span><strong>Blog posts</strong></article>
     <article><span><?= e($counts['inquiries']) ?></span><strong>Total inquiries</strong></article>
     <article><span><?= e($counts['new_inquiries']) ?></span><strong>New inquiries</strong></article>

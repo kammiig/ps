@@ -736,15 +736,28 @@ final class WhmcsService
 
     public function acceptOrder(int $orderId): array
     {
-        $decoded = $this->callApi([
+        $payload = [
             'action' => 'AcceptOrder',
             'orderid' => $orderId,
             'autosetup' => true,
+            'sendregistrar' => true,
             'sendemail' => true,
             'responsetype' => 'json',
-        ]);
+        ];
+
+        $registrar = trim((string) ($this->settings['whmcs_domain_registrar'] ?? $this->config['domain_registrar'] ?? env('WHMCS_DOMAIN_REGISTRAR', '')));
+        if ($registrar !== '') {
+            $payload['registrar'] = $registrar;
+        }
+
+        $decoded = $this->callApi($payload);
 
         if (($decoded['result'] ?? '') !== 'success') {
+            $message = (string) ($decoded['message'] ?? 'Unable to accept WHMCS order.');
+            if (str_contains(strtolower($message), 'status not pending')) {
+                return ['ok' => true, 'already_processed' => true, 'message' => $message];
+            }
+
             return ['ok' => false, 'message' => $decoded['message'] ?? 'Unable to accept WHMCS order.'];
         }
 
@@ -759,7 +772,7 @@ final class WhmcsService
 
         $decoded = $this->callApi([
             'action' => 'ModuleCreate',
-            'accountid' => $serviceId,
+            'serviceid' => $serviceId,
             'responsetype' => 'json',
         ]);
 
@@ -767,6 +780,34 @@ final class WhmcsService
             return [
                 'ok' => false,
                 'message' => $decoded['message'] ?? 'Unable to create hosting account.',
+                'raw' => $decoded,
+            ];
+        }
+
+        return ['ok' => true, 'raw' => $decoded];
+    }
+
+    public function domainRegister(int $domainId, string $domain = ''): array
+    {
+        if ($domainId <= 0 && trim($domain) === '') {
+            return ['ok' => false, 'message' => 'A valid domain reference is required.'];
+        }
+
+        $payload = [
+            'action' => 'DomainRegister',
+            'responsetype' => 'json',
+        ];
+        if ($domainId > 0) {
+            $payload['domainid'] = $domainId;
+        } else {
+            $payload['domain'] = $domain;
+        }
+
+        $decoded = $this->callApi($payload);
+        if (($decoded['result'] ?? '') !== 'success') {
+            return [
+                'ok' => false,
+                'message' => $decoded['message'] ?? 'Unable to register domain.',
                 'raw' => $decoded,
             ];
         }

@@ -160,7 +160,7 @@ final class PaymentRepository
         $stmt = $this->db->prepare(
             'UPDATE customer_orders
              SET payment_status = "paid", stripe_payment_reference = :reference, last_error = NULL,
-                 paid_at = NOW(), updated_at = NOW()
+                 paid_at = COALESCE(paid_at, NOW()), updated_at = NOW()
              WHERE id = :id'
         );
         $stmt->execute(['id' => $id, 'reference' => $reference]);
@@ -281,7 +281,7 @@ final class PaymentRepository
     {
         $columns = $this->customerOrderColumns();
         $fields = [];
-        foreach (['order_type', 'selected_domain', 'hosting_plan_slug', 'package_label', 'billing_cycle'] as $field) {
+        foreach (['order_type', 'selected_domain', 'hosting_plan_slug', 'package_label', 'billing_cycle', 'whm_package'] as $field) {
             if (isset($columns[$field]) && array_key_exists($field, $data)) {
                 $limit = $field === 'selected_domain' ? 255 : 190;
                 $fields[$field] = $data[$field] !== null ? substr((string) $data[$field], 0, $limit) : null;

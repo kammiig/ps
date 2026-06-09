@@ -10,7 +10,8 @@ app/Services/WhmcsService.php         WHMCS API wrapper
 app/Services/StripeService.php        Server-side Stripe PaymentIntent and webhook helper
 app/Controllers/SiteController.php    Domain API, checkout page and order submit endpoint
 app/Controllers/PaymentController.php On-site invoice payment and Stripe webhook endpoint
-app/Controllers/AccountController.php Customer login, dashboard, billing, services and profile
+app/Controllers/AccountController.php Customer login, dashboard, domains, hosting, website projects, billing and profile
+app/Models/ProvisioningRepository.php Local provisioning and website project records
 app/Views/site/domain-search.php      Domain results page
 app/Views/site/checkout.php           Main-site checkout form
 app/Views/site/payment.php            Stripe Payment Element page
@@ -34,9 +35,13 @@ GET  /checkout/success
 GET  /checkout/payment-failed
 POST /stripe/webhook
 GET  /account/dashboard
+GET  /account/domains
+GET  /account/hosting
+GET  /account/website-development
 GET  /account/services
 GET  /account/billing
 GET  /account/profile
+GET  /admin/website-projects
 ```
 
 ## WHMCS API Actions Used
@@ -48,10 +53,12 @@ GET  /account/profile
 - `AddOrder` creates the WHMCS order and invoice.
 - `GetInvoice` loads the exact invoice amount before creating a Stripe PaymentIntent.
 - `GetInvoices` loads customer invoices for `/account/billing`.
-- `GetClientsProducts` and `GetClientsDomains` load services/domains for `/account/services`.
+- `GetClientsProducts` and `GetClientsDomains` load services/domains for the customer account.
 - `UpdateClient` syncs customer profile edits.
 - `AddInvoicePayment` records verified Stripe payments against the existing WHMCS invoice.
-- `AcceptOrder` and `CreateSsoToken` wrappers exist in the service, but checkout does not automatically call them. Accept orders only after payment or an approved operational flow.
+- `AcceptOrder` runs only after verified payment, with automatic setup enabled and registrar submission requested.
+- `ModuleCreate` is used only after verified payment for paid hosting services that still need setup.
+- `CreateSsoToken` exists for safe WHMCS SSO flows, but cPanel buttons are only shown when a safe URL is available.
 
 ## Product ID Mapping
 
@@ -65,10 +72,17 @@ WHMCS_API_ACCESS_KEY=
 WHMCS_API_SSL_VERIFY=true
 WHMCS_PAYMENT_METHOD=stripe
 WHMCS_PAYMENT_GATEWAY_NAME=
+WHMCS_DOMAIN_REGISTRAR=
 WHMCS_STARTER_HOSTING_PID=1
+WHMCS_STARTER_WHM_PACKAGE=planetic_starter
 WHMCS_BUSINESS_HOSTING_PID=2
-WHMCS_WORDPRESS_HOSTING_PID=3
-WHMCS_RESELLER_HOSTING_PID=4
+WHMCS_BUSINESS_WHM_PACKAGE=planetic_business
+WHMCS_PRO_HOSTING_PID=3
+WHMCS_PRO_WHM_PACKAGE=planetic_pro
+WHMCS_AGENCY_HOSTING_PID=4
+WHMCS_AGENCY_WHM_PACKAGE=planetic_agency
+WHMCS_ECOMMERCE_HOSTING_PID=4
+WHMCS_ECOMMERCE_WHM_PACKAGE=planetic_agency
 WHMCS_WEBSITE_PACKAGE_PID=5
 WHMCS_WEBSITE_PRICE_OVERRIDE=199.00
 WHMCS_WEBSITE_REGISTER_DOMAIN=true
@@ -114,6 +128,8 @@ payment_intent.payment_failed
 
 On `payment_intent.succeeded`, the webhook verifies the Stripe signature, checks the local order, validates amount/currency, then calls WHMCS `AddInvoicePayment` using `WHMCS_PAYMENT_GATEWAY_NAME`. Set this value to the exact WHMCS payment gateway system name you want to appear on invoice payments. Do not guess it in code.
 
+After the WHMCS invoice is confirmed paid, the site marks the local payment record paid, accepts the WHMCS order, requests registrar submission for domains, requests hosting module creation for paid hosting services, creates or updates website project records, and clears customer account WHMCS cache.
+
 On `payment_intent.payment_failed`, the local order is marked failed and the existing WHMCS invoice remains unpaid. Retry uses the same local invoice mapping.
 
 ## Setup Steps
@@ -128,7 +144,10 @@ On `payment_intent.payment_failed`, the local order is marked failed and the exi
 8. Configure domain registrar/TLD pricing in WHMCS.
 9. Upload the site to cPanel and keep `.env`, `app/`, `database/` and `storage/` protected by `.htaccess`.
 10. Import `database/stripe_account_update.sql` if this is an existing installation.
-11. Test the flow with Stripe test mode and low-value WHMCS products first.
+11. Import `database/customer_order_checkout_metadata.sql` and `database/provisioning_and_website_projects.sql` for the local checkout/provisioning records.
+12. In WHMCS, confirm each hosting product is assigned to the correct cPanel package: Starter `planetic_starter`, Business `planetic_business`, Pro `planetic_pro`, Agency/Ecommerce `planetic_agency`.
+13. Confirm WHMCS domain registrar modules and TLD auto-registration settings are configured.
+14. Test the flow with Stripe test mode and low-value WHMCS products first.
 
 If domain search or checkout says WHMCS is not responding, check `storage/logs/whmcs-api.log`. The website calls WHMCS server-side using cURL first, then a PHP stream fallback. Most failures are caused by missing API credentials, WHMCS API IP restrictions, an incorrect `WHMCS_API_URL`, or cPanel outbound HTTPS/SSL issues.
 
@@ -184,8 +203,14 @@ These shortcodes send visitors to the main website checkout. They do not store W
 - Submit domain + hosting.
 - Submit the £199 website package.
 - Pay with Stripe test card `4242 4242 4242 4242` and confirm the Stripe webhook records payment in WHMCS.
+- Confirm the paid WHMCS order is accepted only after verified payment.
+- Confirm paid domain orders appear in `/account/domains`.
+- Confirm paid hosting orders appear in `/account/hosting` with the expected WHM package label.
+- Confirm paid website package orders appear in `/account/website-development`.
+- Update a website project in `/admin/website-projects` and confirm only the customer-facing note appears in the customer account.
 - Test failed payment with Stripe test card `4000 0000 0000 9995` and confirm retry uses the same invoice.
-- Log in at `/account/login`, then check `/account/dashboard`, `/account/services`, `/account/billing` and `/account/profile`.
+- Log in at `/account/login`, then check `/account/dashboard`, `/account/domains`, `/account/hosting`, `/account/website-development`, `/account/billing` and `/account/profile`.
 - Use Pay Now on an unpaid invoice from `/account/billing` and confirm it opens on-site Stripe payment.
-- Confirm unpaid orders are not provisioned until WHMCS payment/approval automation handles them.
+- Confirm unpaid orders are not provisioned.
+- Refresh `/checkout/success`, retry the webhook event, and confirm duplicate domain/hosting/project records are not created.
 - Check `storage/logs/whmcs-api.log` for safe error messages if an API call fails.

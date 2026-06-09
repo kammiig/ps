@@ -11,6 +11,7 @@ use App\Core\RateLimiter;
 use App\Models\ContentRepository;
 use App\Models\CustomerRepository;
 use App\Models\PaymentRepository;
+use App\Models\ProvisioningRepository;
 use App\Services\Mailer;
 use App\Services\WhmcsService;
 
@@ -19,6 +20,7 @@ final class AccountController extends Controller
     private ContentRepository $content;
     private CustomerRepository $customers;
     private PaymentRepository $payments;
+    private ProvisioningRepository $provisioning;
     private CustomerAuth $auth;
     private WhmcsService $whmcs;
     private array $settings;
@@ -28,6 +30,7 @@ final class AccountController extends Controller
         $this->content = new ContentRepository();
         $this->customers = new CustomerRepository();
         $this->payments = new PaymentRepository();
+        $this->provisioning = new ProvisioningRepository();
         $this->auth = new CustomerAuth();
         $this->settings = $this->content->settings();
         $this->whmcs = new WhmcsService($this->settings);
@@ -233,18 +236,54 @@ final class AccountController extends Controller
     {
         $user = $this->requireCustomer();
         $account = $this->fullUser($user);
-        $services = $this->clientServices($account, false);
         $invoices = $this->clientInvoices($account, false);
-        $recentPayments = $this->accountPaymentOrders($account, 3);
+        $payments = $this->accountPaymentOrders($account, 8);
+        $domains = $this->accountDomainsForView($account, false);
+        $hosting = $this->accountHostingForView($account, false);
+        $websiteProjects = $this->accountWebsiteProjects($account);
 
         return $this->render('account/dashboard', $this->baseData('account-dashboard', [
             'account' => $account,
-            'services' => $services,
             'invoices' => $invoices,
-            'recentPayments' => $recentPayments,
-            'activeCount' => count(array_filter($services, static fn (array $service): bool => strtolower((string) ($service['status'] ?? '')) === 'active')),
+            'domains' => $domains,
+            'hosting' => $hosting,
+            'websiteProjects' => $websiteProjects,
+            'recentPayments' => array_slice($payments, 0, 3),
+            'recentActivity' => $this->recentAccountActivity($domains, $hosting, $websiteProjects, $payments),
+            'domainCount' => count($domains),
+            'hostingCount' => count($hosting),
+            'websiteProjectCount' => count($websiteProjects),
             'unpaidCount' => count(array_filter($invoices, static fn (array $invoice): bool => in_array(strtolower((string) ($invoice['status'] ?? '')), ['unpaid', 'payment pending'], true))),
-            'nextDueDate' => $this->nextDueDate($services),
+        ]));
+    }
+
+    public function domains(): string
+    {
+        $account = $this->fullUser($this->requireCustomer());
+
+        return $this->render('account/domains', $this->baseData('account-domains', [
+            'account' => $account,
+            'domains' => $this->accountDomainsForView($account),
+        ]));
+    }
+
+    public function hosting(): string
+    {
+        $account = $this->fullUser($this->requireCustomer());
+
+        return $this->render('account/hosting', $this->baseData('account-hosting', [
+            'account' => $account,
+            'hosting' => $this->accountHostingForView($account),
+        ]));
+    }
+
+    public function websiteDevelopment(): string
+    {
+        $account = $this->fullUser($this->requireCustomer());
+
+        return $this->render('account/website-development', $this->baseData('account-website-development', [
+            'account' => $account,
+            'projects' => $this->accountWebsiteProjects($account),
         ]));
     }
 
@@ -369,14 +408,18 @@ final class AccountController extends Controller
 
     private function clientServices(array $account, bool $allowLiveLoad = true): array
     {
-        $services = [];
-        if (!empty($account['whmcs_client_id'])) {
-            $clientId = (int) $account['whmcs_client_id'];
-            $result = $this->cachedWhmcsRead($clientId, 'products', fn (): array => $this->whmcs->productsForClient($clientId), $allowLiveLoad);
-            $services = $result['ok'] ? array_map([$this, 'friendlyService'], $result['products']) : [];
+        return $this->mergeLocalServices($account, $this->clientLiveServices($account, $allowLiveLoad));
+    }
+
+    private function clientLiveServices(array $account, bool $allowLiveLoad = true): array
+    {
+        if (empty($account['whmcs_client_id'])) {
+            return [];
         }
 
-        return $this->mergeLocalServices($account, $services);
+        $clientId = (int) $account['whmcs_client_id'];
+        $result = $this->cachedWhmcsRead($clientId, 'products', fn (): array => $this->whmcs->productsForClient($clientId), $allowLiveLoad);
+        return $result['ok'] ? array_map([$this, 'friendlyService'], $result['products']) : [];
     }
 
     private function clientDomains(array $account, bool $allowLiveLoad = true): array
@@ -400,6 +443,247 @@ final class AccountController extends Controller
         }
 
         return $this->mergeLocalInvoices($account, $invoices);
+    }
+
+    private function accountDomainsForView(array $account, bool $allowLiveLoad = true): array
+    {
+        $rows = [];
+        foreach ($this->clientDomains($account, $allowLiveLoad) as $domain) {
+            $row = $this->domainViewRow($domain);
+            $rows[strtolower($row['domain_name'])] = $row;
+        }
+
+        foreach ($this->localProvisioningItems($account, 'domain') as $item) {
+            $row = $this->localDomainViewRow($item);
+            $key = strtolower($row['domain_name']);
+            if (isset($rows[$key])) {
+                $rows[$key]['setup_issue'] = $row['setup_issue'] ?: $rows[$key]['setup_issue'];
+                $rows[$key]['registrar_status'] = $row['registrar_status'] ?: $rows[$key]['registrar_status'];
+                if ($row['nameservers']) {
+                    $rows[$key]['nameservers'] = $row['nameservers'];
+                }
+                continue;
+            }
+            $rows[$key] = $row;
+        }
+
+        return array_values($rows);
+    }
+
+    private function accountHostingForView(array $account, bool $allowLiveLoad = true): array
+    {
+        $localItems = $this->localProvisioningItems($account, 'hosting');
+        $localByDomain = [];
+        foreach ($localItems as $item) {
+            $localByDomain[strtolower(trim((string) ($item['domain_name'] ?? '')))] = $item;
+        }
+
+        $rows = [];
+        foreach ($this->clientLiveServices($account, $allowLiveLoad) as $service) {
+            $domain = strtolower(trim((string) ($service['domain'] ?? '')));
+            $row = $this->hostingViewRow($service, $localByDomain[$domain] ?? null);
+            $key = strtolower($row['package_name'] . ':' . $row['connected_domain']);
+            $rows[$key] = $row;
+        }
+
+        foreach ($localItems as $item) {
+            $row = $this->localHostingViewRow($item);
+            $key = strtolower($row['package_name'] . ':' . $row['connected_domain']);
+            if (isset($rows[$key])) {
+                $rows[$key]['setup_issue'] = $row['setup_issue'] ?: $rows[$key]['setup_issue'];
+                $rows[$key]['whm_package'] = $row['whm_package'] ?: $rows[$key]['whm_package'];
+                continue;
+            }
+            $rows[$key] = $row;
+        }
+
+        return array_values($rows);
+    }
+
+    private function accountWebsiteProjects(array $account): array
+    {
+        try {
+            $projects = $this->provisioning->websiteProjectsForAccount(
+                isset($account['id']) ? (int) $account['id'] : null,
+                isset($account['whmcs_client_id']) ? (int) $account['whmcs_client_id'] : null
+            );
+            foreach ($projects as &$project) {
+                unset($project['internal_notes']);
+            }
+            unset($project);
+
+            return $projects;
+        } catch (\Throwable $exception) {
+            $this->logAccountIssue('Website projects could not be loaded.', [
+                'customer_id' => (int) ($account['id'] ?? 0),
+                'whmcs_client_id' => (int) ($account['whmcs_client_id'] ?? 0),
+                'type' => get_class($exception),
+                'message' => $exception->getMessage(),
+            ]);
+
+            return [];
+        }
+    }
+
+    private function localProvisioningItems(array $account, string $itemType): array
+    {
+        try {
+            return $this->provisioning->itemsForAccount(
+                isset($account['id']) ? (int) $account['id'] : null,
+                isset($account['whmcs_client_id']) ? (int) $account['whmcs_client_id'] : null,
+                $itemType
+            );
+        } catch (\Throwable $exception) {
+            $this->logAccountIssue('Local provisioning items could not be loaded.', [
+                'customer_id' => (int) ($account['id'] ?? 0),
+                'whmcs_client_id' => (int) ($account['whmcs_client_id'] ?? 0),
+                'item_type' => $itemType,
+                'type' => get_class($exception),
+                'message' => $exception->getMessage(),
+            ]);
+
+            return [];
+        }
+    }
+
+    private function domainViewRow(array $domain): array
+    {
+        $domainId = (int) ($domain['id'] ?? $domain['domainid'] ?? 0);
+        $nameservers = [];
+        if ($domainId > 0) {
+            $loaded = $this->whmcs->nameserversForDomain($domainId);
+            if (!empty($loaded['ok'])) {
+                $nameservers = array_values(array_filter(array_map('strval', $loaded['nameservers'] ?? [])));
+            }
+        }
+
+        $status = (string) ($domain['status'] ?? 'Processing');
+        return [
+            'domain_name' => (string) ($domain['domainname'] ?? $domain['domain'] ?? 'Domain'),
+            'registration_status' => $this->friendlyDomainStatus($status),
+            'registration_date' => $this->dateLabel($domain['registrationdate'] ?? $domain['regdate'] ?? ''),
+            'expiry_date' => $this->dateLabel($domain['expirydate'] ?? ''),
+            'renewal_date' => $this->dateLabel($domain['nextduedate'] ?? ''),
+            'renewal_amount' => $this->amountLabel($domain['recurringamount'] ?? $domain['renewalamount'] ?? null),
+            'nameservers' => $nameservers,
+            'registrar_status' => strtolower($status) === 'active' ? 'Registered' : $this->friendlyDomainStatus($status),
+            'setup_issue' => '',
+            'dns_url' => $domainId > 0 ? url('/account/dns/' . $domainId) : url('/account/dns'),
+        ];
+    }
+
+    private function localDomainViewRow(array $item): array
+    {
+        $nameservers = json_decode((string) ($item['nameservers_json'] ?? '[]'), true);
+        if (!is_array($nameservers) || !$nameservers) {
+            $nameservers = array_values(array_filter($this->whmcs->checkoutConfig()['nameservers'] ?? []));
+        }
+
+        return [
+            'domain_name' => (string) ($item['domain_name'] ?? 'Domain'),
+            'registration_status' => $this->friendlyLocalProvisioningStatus((string) ($item['payment_status'] ?? ''), (string) ($item['domain_registration_status'] ?? ''), 'Processing'),
+            'registration_date' => $this->dateLabel($item['registration_date'] ?? ''),
+            'expiry_date' => $this->dateLabel($item['expiry_date'] ?? ''),
+            'renewal_date' => $this->dateLabel($item['renewal_date'] ?? ''),
+            'renewal_amount' => $this->amountLabel($item['renewal_amount'] ?? null),
+            'nameservers' => array_values(array_filter(array_map('strval', $nameservers))),
+            'registrar_status' => $this->friendlyLocalProvisioningStatus((string) ($item['payment_status'] ?? ''), (string) ($item['domain_registration_status'] ?? ''), 'Processing'),
+            'setup_issue' => (string) ($item['setup_issue_public'] ?? ''),
+            'dns_url' => url('/account/dns'),
+        ];
+    }
+
+    private function hostingViewRow(array $service, ?array $localItem): array
+    {
+        $status = (string) ($service['friendly_status'] ?? $service['status'] ?? 'Processing');
+        $packageName = (string) ($service['name'] ?? $service['productname'] ?? 'Hosting Package');
+        return [
+            'package_name' => $packageName,
+            'connected_domain' => (string) ($service['domain'] ?? 'No domain connected yet'),
+            'hosting_status' => $status,
+            'billing_cycle' => (string) ($service['billingcycle'] ?? 'Not available'),
+            'start_date' => $this->dateLabel($service['regdate'] ?? $service['registrationdate'] ?? ''),
+            'next_due_date' => $this->dateLabel($service['nextduedate'] ?? ''),
+            'renewal_amount' => $this->amountLabel($service['recurringamount'] ?? $service['amount'] ?? null),
+            'server_status' => $status,
+            'whm_package' => (string) ($localItem['whm_package'] ?? $this->defaultWhmPackageForText($packageName)),
+            'cpanel_url' => '',
+            'setup_issue' => (string) ($localItem['setup_issue_public'] ?? ''),
+        ];
+    }
+
+    private function localHostingViewRow(array $item): array
+    {
+        $packageName = (string) ($item['display_name'] ?? 'Hosting Package');
+        return [
+            'package_name' => $packageName,
+            'connected_domain' => (string) (($item['domain_name'] ?? '') ?: 'No domain connected yet'),
+            'hosting_status' => $this->friendlyLocalProvisioningStatus((string) ($item['payment_status'] ?? ''), (string) ($item['hosting_setup_status'] ?? ''), 'Setup in Progress'),
+            'billing_cycle' => $this->billingCycleLabel((string) ($item['billing_cycle'] ?? '')),
+            'start_date' => $this->dateLabel($item['start_date'] ?? $item['created_at'] ?? ''),
+            'next_due_date' => $this->dateLabel($item['next_due_date'] ?? ''),
+            'renewal_amount' => $this->amountLabel($item['renewal_amount'] ?? null),
+            'server_status' => $this->friendlyProvisioningStatus((string) ($item['provisioning_status'] ?? 'processing')),
+            'whm_package' => (string) ($item['whm_package'] ?? $this->defaultWhmPackageForText($packageName)),
+            'cpanel_url' => '',
+            'setup_issue' => (string) ($item['setup_issue_public'] ?? ''),
+        ];
+    }
+
+    private function recentAccountActivity(array $domains, array $hosting, array $projects, array $payments): array
+    {
+        $activity = [];
+        foreach ($payments as $payment) {
+            if (($payment['payment_status'] ?? '') === 'paid') {
+                $activity[] = [
+                    'label' => 'Payment confirmed',
+                    'detail' => 'Invoice #' . (int) ($payment['whmcs_invoice_id'] ?? 0),
+                    'date' => (string) ($payment['paid_at'] ?? $payment['updated_at'] ?? ''),
+                ];
+            }
+        }
+
+        foreach ($domains as $domain) {
+            if (($domain['registration_status'] ?? '') === 'Registered') {
+                $activity[] = [
+                    'label' => 'Domain registered',
+                    'detail' => (string) ($domain['domain_name'] ?? ''),
+                    'date' => (string) ($domain['registration_date'] ?? ''),
+                ];
+            }
+        }
+
+        foreach ($hosting as $service) {
+            if (in_array((string) ($service['hosting_status'] ?? ''), ['Active', 'Setup Completed'], true)) {
+                $activity[] = [
+                    'label' => 'Hosting setup completed',
+                    'detail' => (string) ($service['package_name'] ?? 'Hosting'),
+                    'date' => (string) ($service['start_date'] ?? ''),
+                ];
+            }
+        }
+
+        foreach ($projects as $project) {
+            $activity[] = [
+                'label' => 'Website package purchased',
+                'detail' => (string) ($project['package_name'] ?? 'Website Development'),
+                'date' => (string) ($project['purchase_date'] ?? $project['created_at'] ?? ''),
+            ];
+            if (!in_array((string) ($project['project_status'] ?? ''), ['Payment Pending', 'Payment Confirmed'], true)) {
+                $activity[] = [
+                    'label' => 'Project status updated',
+                    'detail' => (string) ($project['project_status'] ?? ''),
+                    'date' => (string) ($project['updated_at'] ?? ''),
+                ];
+            }
+        }
+
+        usort($activity, static function (array $left, array $right): int {
+            $leftTime = strtotime((string) ($left['date'] ?? '')) ?: 0;
+            $rightTime = strtotime((string) ($right['date'] ?? '')) ?: 0;
+            return $rightTime <=> $leftTime;
+        });
+        return array_slice($activity, 0, 8);
     }
 
     private function mergeLocalInvoices(array $account, array $invoices): array
@@ -629,6 +913,90 @@ final class AccountController extends Controller
         return $cycle !== '' ? ucwords(str_replace('-', ' ', $cycle)) : 'Monthly';
     }
 
+    private function billingCycleLabel(string $cycle): string
+    {
+        $cycle = strtolower(trim($cycle));
+        return match ($cycle) {
+            'annually', 'annual', 'yearly', 'year' => 'Yearly',
+            'monthly' => 'Monthly',
+            'onetime', 'one-time', 'one time' => 'One-time',
+            default => $cycle !== '' ? ucwords(str_replace(['-', '_'], ' ', $cycle)) : 'Not available',
+        };
+    }
+
+    private function friendlyDomainStatus(string $status): string
+    {
+        $status = strtolower(trim($status));
+        return match ($status) {
+            'active' => 'Registered',
+            'pending', 'pending registration' => 'Processing',
+            'expired' => 'Expired',
+            'cancelled', 'canceled', 'fraud' => 'Action Required',
+            default => $status !== '' ? ucwords(str_replace(['-', '_'], ' ', $status)) : 'Processing',
+        };
+    }
+
+    private function friendlyLocalProvisioningStatus(string $paymentStatus, string $status, string $fallback): string
+    {
+        if ($paymentStatus !== 'paid') {
+            return 'Payment Pending';
+        }
+
+        $status = trim($status);
+        return $status !== '' ? $status : $fallback;
+    }
+
+    private function friendlyProvisioningStatus(string $status): string
+    {
+        return match (strtolower(trim($status))) {
+            'pending_payment' => 'Payment Pending',
+            'processing' => 'Setup in Progress',
+            'active' => 'Active',
+            'action_required' => 'Action Required',
+            'cancelled', 'canceled' => 'Cancelled',
+            default => 'Setup in Progress',
+        };
+    }
+
+    private function dateLabel(mixed $date): string
+    {
+        $date = trim((string) $date);
+        if ($date === '' || $date === '0000-00-00' || $date === '0000-00-00 00:00:00') {
+            return 'Not available';
+        }
+
+        return substr($date, 0, 10);
+    }
+
+    private function amountLabel(mixed $amount): string
+    {
+        if ($amount === null || $amount === '') {
+            return 'Not available';
+        }
+
+        $value = $this->accountMoneyToFloat($amount);
+        return $value > 0 ? money(number_format($value, 2, '.', '')) : 'Not available';
+    }
+
+    private function defaultWhmPackageForText(string $text): string
+    {
+        $text = strtolower($text);
+        if (str_contains($text, 'starter')) {
+            return 'planetic_starter';
+        }
+        if (str_contains($text, 'business')) {
+            return 'planetic_business';
+        }
+        if (str_contains($text, 'agency') || str_contains($text, 'ecommerce') || str_contains($text, 'commerce') || str_contains($text, 'reseller')) {
+            return 'planetic_agency';
+        }
+        if (str_contains($text, 'pro') || str_contains($text, 'wordpress')) {
+            return 'planetic_pro';
+        }
+
+        return '';
+    }
+
     private function localOrderNextDueDate(array $order, string $cycle): string
     {
         if ($cycle === 'One-time') {
@@ -765,7 +1133,7 @@ final class AccountController extends Controller
     {
         $lower = strtolower($message);
         if (str_contains($lower, 'bridge action is not allowed')) {
-            return 'DNS management needs the latest WHMCS bridge file uploaded to the client area folder.';
+            return 'DNS management is being updated. Please contact support if you need an urgent nameserver change.';
         }
 
         if (str_contains($lower, 'not found')) {

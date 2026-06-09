@@ -14,6 +14,7 @@
             <a href="<?= e(url('/admin/homepage')) ?>">Homepage</a>
             <a href="<?= e(url('/admin/plans')) ?>">Hosting Plans</a>
             <a href="<?= e(url('/admin/package')) ?>">Website Package</a>
+            <a href="<?= e(url('/admin/website-projects')) ?>">Website Projects</a>
             <a href="<?= e(url('/admin/tlds')) ?>">Domains/TLDs</a>
             <a href="<?= e(url('/admin/pages')) ?>">Pages</a>
             <a href="<?= e(url('/admin/blog')) ?>">Blog</a>

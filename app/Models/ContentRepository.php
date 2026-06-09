@@ -35,6 +35,7 @@ final class ContentRepository
         $settings['domain_hosting_pid'] ??= env('DOMAIN_HOSTING_PID', '');
         $settings['whmcs_payment_method'] ??= env('WHMCS_PAYMENT_METHOD', 'stripe');
         $settings['whmcs_payment_gateway_name'] ??= env('WHMCS_PAYMENT_GATEWAY_NAME', '');
+        $settings['whmcs_domain_registrar'] ??= env('WHMCS_DOMAIN_REGISTRAR', '');
         $settings['admin_email'] ??= env('ADMIN_EMAIL', '');
         $settings['mail_from'] ??= env('MAIL_FROM', '');
 
@@ -398,7 +399,17 @@ final class ContentRepository
             'posts' => (int) $this->db->query('SELECT COUNT(*) FROM blog_posts')->fetchColumn(),
             'inquiries' => (int) $this->db->query('SELECT COUNT(*) FROM inquiries')->fetchColumn(),
             'new_inquiries' => (int) $this->db->query("SELECT COUNT(*) FROM inquiries WHERE status = 'new'")->fetchColumn(),
+            'website_projects' => $this->safeCount('website_projects'),
         ];
+    }
+
+    private function safeCount(string $table): int
+    {
+        try {
+            return (int) $this->db->query('SELECT COUNT(*) FROM ' . $table)->fetchColumn();
+        } catch (\Throwable) {
+            return 0;
+        }
     }
 
     public function sitemapUrls(): array

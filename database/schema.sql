@@ -12,6 +12,8 @@ DROP TABLE IF EXISTS domain_tlds;
 DROP TABLE IF EXISTS hosting_plans;
 DROP TABLE IF EXISTS seo_settings;
 DROP TABLE IF EXISTS settings;
+DROP TABLE IF EXISTS website_projects;
+DROP TABLE IF EXISTS customer_provisioning_items;
 DROP TABLE IF EXISTS stripe_webhook_events;
 DROP TABLE IF EXISTS customer_orders;
 DROP TABLE IF EXISTS customer_password_resets;
@@ -91,17 +93,97 @@ CREATE TABLE customer_orders (
     hosting_plan_slug VARCHAR(120) NULL,
     package_label VARCHAR(190) NULL,
     billing_cycle VARCHAR(32) NULL,
+    provisioning_status VARCHAR(40) NOT NULL DEFAULT 'pending_payment',
+    domain_registration_status VARCHAR(80) NULL,
+    hosting_setup_status VARCHAR(80) NULL,
+    website_project_status VARCHAR(80) NULL,
+    whm_package VARCHAR(120) NULL,
+    provisioning_last_error TEXT NULL,
     payment_status ENUM('pending', 'processing', 'paid', 'failed') NOT NULL DEFAULT 'pending',
     stripe_payment_intent_id VARCHAR(120) NULL UNIQUE,
     stripe_payment_reference VARCHAR(160) NULL,
     last_error TEXT NULL,
     paid_at DATETIME NULL,
+    provisioned_at DATETIME NULL,
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL,
     INDEX customer_orders_customer_index (customer_user_id),
     INDEX customer_orders_whmcs_client_index (whmcs_client_id),
     INDEX customer_orders_status_index (payment_status),
     CONSTRAINT customer_orders_user_fk FOREIGN KEY (customer_user_id) REFERENCES customer_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE customer_provisioning_items (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    customer_order_id INT UNSIGNED NOT NULL,
+    customer_user_id INT UNSIGNED NULL,
+    whmcs_client_id INT UNSIGNED NOT NULL,
+    whmcs_order_id INT UNSIGNED NULL,
+    whmcs_invoice_id INT UNSIGNED NOT NULL,
+    item_type ENUM('domain', 'hosting') NOT NULL,
+    item_key VARCHAR(255) NOT NULL,
+    display_name VARCHAR(190) NOT NULL,
+    domain_name VARCHAR(255) NULL,
+    hosting_plan_slug VARCHAR(120) NULL,
+    whm_package VARCHAR(120) NULL,
+    billing_cycle VARCHAR(32) NULL,
+    payment_status ENUM('pending', 'processing', 'paid', 'failed') NOT NULL DEFAULT 'pending',
+    provisioning_status ENUM('pending_payment', 'processing', 'active', 'action_required', 'cancelled') NOT NULL DEFAULT 'pending_payment',
+    domain_registration_status VARCHAR(80) NULL,
+    hosting_setup_status VARCHAR(80) NULL,
+    whmcs_domain_id INT UNSIGNED NULL,
+    whmcs_service_id INT UNSIGNED NULL,
+    registration_date DATE NULL,
+    expiry_date DATE NULL,
+    renewal_date DATE NULL,
+    start_date DATE NULL,
+    next_due_date DATE NULL,
+    renewal_amount DECIMAL(12,2) NULL,
+    nameservers_json TEXT NULL,
+    setup_issue_public VARCHAR(255) NULL,
+    setup_issue_internal TEXT NULL,
+    stripe_reference VARCHAR(160) NULL,
+    provision_attempts INT UNSIGNED NOT NULL DEFAULT 0,
+    last_attempt_at DATETIME NULL,
+    provisioned_at DATETIME NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    UNIQUE KEY customer_provisioning_order_item_unique (customer_order_id, item_type, item_key),
+    INDEX customer_provisioning_customer_index (customer_user_id),
+    INDEX customer_provisioning_whmcs_client_index (whmcs_client_id),
+    INDEX customer_provisioning_invoice_index (whmcs_invoice_id),
+    INDEX customer_provisioning_status_index (provisioning_status),
+    CONSTRAINT customer_provisioning_order_fk FOREIGN KEY (customer_order_id) REFERENCES customer_orders(id) ON DELETE CASCADE,
+    CONSTRAINT customer_provisioning_user_fk FOREIGN KEY (customer_user_id) REFERENCES customer_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE website_projects (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    customer_order_id INT UNSIGNED NOT NULL UNIQUE,
+    customer_user_id INT UNSIGNED NULL,
+    whmcs_client_id INT UNSIGNED NOT NULL,
+    whmcs_order_id INT UNSIGNED NULL,
+    whmcs_invoice_id INT UNSIGNED NOT NULL,
+    package_name VARCHAR(190) NOT NULL,
+    domain_name VARCHAR(255) NULL,
+    hosting_plan_slug VARCHAR(120) NULL,
+    payment_status VARCHAR(40) NOT NULL DEFAULT 'Payment Pending',
+    project_status VARCHAR(80) NOT NULL DEFAULT 'Payment Pending',
+    onboarding_status VARCHAR(120) NOT NULL DEFAULT 'Payment Pending',
+    customer_note TEXT NULL,
+    internal_notes TEXT NULL,
+    estimated_next_step VARCHAR(255) NULL,
+    purchase_date DATE NULL,
+    completed_at DATETIME NULL,
+    delivered_at DATETIME NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    INDEX website_projects_customer_index (customer_user_id),
+    INDEX website_projects_whmcs_client_index (whmcs_client_id),
+    INDEX website_projects_invoice_index (whmcs_invoice_id),
+    INDEX website_projects_status_index (project_status),
+    CONSTRAINT website_projects_order_fk FOREIGN KEY (customer_order_id) REFERENCES customer_orders(id) ON DELETE CASCADE,
+    CONSTRAINT website_projects_user_fk FOREIGN KEY (customer_user_id) REFERENCES customer_users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE stripe_webhook_events (

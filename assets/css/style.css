@@ -2290,7 +2290,7 @@ body.modal-open {
 }
 
 .account-stat-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .account-grid.two {
@@ -2466,6 +2466,49 @@ body.modal-open {
     color: var(--navy);
     font-weight: 850;
     text-align: right;
+}
+
+.account-detail-grid article {
+    display: grid;
+    align-content: start;
+    gap: 12px;
+}
+
+.account-detail-grid article > p {
+    margin-bottom: 0;
+}
+
+.account-friendly-note {
+    padding: 12px;
+    color: #705315;
+    background: #fff7df;
+    border: 1px solid #f4df9d;
+    border-radius: var(--radius);
+}
+
+.nameserver-list {
+    display: grid;
+    gap: 6px;
+    padding: 14px;
+    color: var(--muted);
+    background: #f8fbfd;
+    border: 1px solid #e5edf4;
+    border-radius: var(--radius);
+}
+
+.nameserver-list strong {
+    color: var(--navy);
+}
+
+.empty-account-state {
+    display: grid;
+    justify-items: start;
+    gap: 10px;
+}
+
+.empty-account-state h2,
+.empty-account-state p {
+    margin-bottom: 0;
 }
 
 .invoice-table-wrap {

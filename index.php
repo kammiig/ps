@@ -44,6 +44,9 @@ $router->post('/account/password-reset', [AccountController::class, 'passwordRes
 $router->get('/account/password-reset/{token}', [AccountController::class, 'passwordResetForm']);
 $router->post('/account/password-reset/{token}', [AccountController::class, 'passwordResetForm']);
 $router->get('/account/dashboard', [AccountController::class, 'dashboard']);
+$router->get('/account/domains', [AccountController::class, 'domains']);
+$router->get('/account/hosting', [AccountController::class, 'hosting']);
+$router->get('/account/website-development', [AccountController::class, 'websiteDevelopment']);
 $router->get('/account/services', [AccountController::class, 'services']);
 $router->get('/account/billing', [AccountController::class, 'billing']);
 $router->post('/account/billing/{invoiceId}/pay', [PaymentController::class, 'payInvoice']);
@@ -63,6 +66,9 @@ $router->get('/admin/homepage', [AdminController::class, 'homepage']);
 $router->post('/admin/homepage', [AdminController::class, 'homepage']);
 $router->get('/admin/package', [AdminController::class, 'package']);
 $router->post('/admin/package', [AdminController::class, 'package']);
+$router->get('/admin/website-projects', [AdminController::class, 'websiteProjects']);
+$router->get('/admin/website-projects/{id}/edit', [AdminController::class, 'websiteProjectForm']);
+$router->post('/admin/website-projects/{id}/edit', [AdminController::class, 'websiteProjectForm']);
 
 $router->get('/admin/plans', [AdminController::class, 'plans']);
 $router->get('/admin/plans/create', [AdminController::class, 'planForm']);

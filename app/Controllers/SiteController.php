@@ -10,6 +10,7 @@ use App\Core\CustomerAuth;
 use App\Models\ContentRepository;
 use App\Models\CustomerRepository;
 use App\Models\PaymentRepository;
+use App\Models\ProvisioningRepository;
 use App\Services\Mailer;
 use App\Services\RecaptchaService;
 use App\Services\WhmcsService;
@@ -477,6 +478,7 @@ final class SiteController extends Controller
         $checkoutPlan = in_array((string) ($data['order_type'] ?? ''), ['hosting', 'bundle'], true)
             ? $this->checkoutPlanBySlug((string) ($data['hosting_plan'] ?? ''))
             : null;
+        $whmPackage = $checkoutPlan ? $this->whmPackageForHostingPlan($checkoutPlan) : '';
         $packageLabel = match ((string) ($data['order_type'] ?? '')) {
             'website' => 'Bespoke Website Development',
             'domain' => 'Domain Registration',
@@ -496,7 +498,20 @@ final class SiteController extends Controller
             'hosting_plan_slug' => (string) ($data['hosting_plan'] ?? ''),
             'package_label' => $packageLabel,
             'billing_cycle' => (string) ($data['billing_cycle'] ?? ''),
+            'whm_package' => $whmPackage,
         ]);
+
+        try {
+            (new ProvisioningRepository())->ensureOrderRecords($payment, $whmPackage);
+        } catch (\Throwable $exception) {
+            $this->writeCheckoutLog('Local provisioning records could not be prepared after checkout.', [
+                'local_order_id' => (int) ($payment['id'] ?? 0),
+                'whmcs_order_id' => $orderId,
+                'invoice_id' => $invoiceId,
+                'order_type' => (string) ($data['order_type'] ?? ''),
+                'message' => $exception->getMessage(),
+            ]);
+        }
 
         $this->redirect(url('/checkout/payment/' . $payment['public_token']));
     }
@@ -1275,8 +1290,38 @@ final class SiteController extends Controller
 
             $plan['checkout_pid'] = $pid;
             $plan['checkout_billing_cycle'] = (string) ($configured['billing_cycle'] ?? $config['default_billing_cycle'] ?? 'monthly');
+            $plan['checkout_whm_package'] = (string) ($configured['whm_package'] ?? $this->defaultWhmPackageForPlan($plan));
             return $plan;
         }, $this->content->hostingPlans(null, true));
+    }
+
+    private function whmPackageForHostingPlan(?array $plan): string
+    {
+        if (!$plan) {
+            return '';
+        }
+
+        $configured = trim((string) ($plan['checkout_whm_package'] ?? ''));
+        return $configured !== '' ? $configured : $this->defaultWhmPackageForPlan($plan);
+    }
+
+    private function defaultWhmPackageForPlan(array $plan): string
+    {
+        $haystack = strtolower((string) ($plan['slug'] ?? '') . ' ' . (string) ($plan['title'] ?? '') . ' ' . (string) ($plan['plan_type'] ?? ''));
+        if (str_contains($haystack, 'starter')) {
+            return 'planetic_starter';
+        }
+        if (str_contains($haystack, 'business')) {
+            return 'planetic_business';
+        }
+        if (str_contains($haystack, 'agency') || str_contains($haystack, 'ecommerce') || str_contains($haystack, 'commerce') || str_contains($haystack, 'reseller')) {
+            return 'planetic_agency';
+        }
+        if (str_contains($haystack, 'pro') || str_contains($haystack, 'wordpress')) {
+            return 'planetic_pro';
+        }
+
+        return '';
     }
 
     private function checkoutPlanBySlug(string $slug): ?array
