@@ -7,10 +7,12 @@ namespace App\Services;
 final class CloudflareDnsService
 {
     private string $token;
+    private string $accountId;
 
     public function __construct(private array $settings = [])
     {
         $this->token = trim((string) ($settings['cloudflare_api_token'] ?? env('CLOUDFLARE_API_TOKEN', '')));
+        $this->accountId = trim((string) ($settings['cloudflare_account_id'] ?? env('CLOUDFLARE_ACCOUNT_ID', '')));
     }
 
     public function configuredForDomain(string $domain): bool
@@ -91,6 +93,334 @@ final class CloudflareDnsService
         }
 
         return ['ok' => true];
+    }
+
+    public function provisionHostingZone(string $domain, string $serverIp): array
+    {
+        $domain = $this->normaliseDomain($domain);
+        if ($domain === '') {
+            return ['ok' => false, 'message' => 'A valid domain is required for DNS provisioning.'];
+        }
+        if (!filter_var($serverIp, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            return ['ok' => false, 'message' => 'A valid hosting server IPv4 address is required for DNS provisioning.'];
+        }
+        if ($this->token === '') {
+            return ['ok' => false, 'message' => 'Cloudflare API token is not configured.'];
+        }
+
+        $zone = $this->findZone($domain);
+        if (empty($zone['ok'])) {
+            return ['ok' => false, 'message' => $zone['message'] ?? 'Cloudflare zone lookup failed.'];
+        }
+        if (empty($zone['found'])) {
+            $zone = $this->createZone($domain);
+        }
+        if (empty($zone['ok'])) {
+            return ['ok' => false, 'message' => $zone['message'] ?? 'Cloudflare zone could not be created.'];
+        }
+
+        $zoneId = (string) ($zone['zone_id'] ?? '');
+        if ($zoneId === '') {
+            return ['ok' => false, 'message' => 'Cloudflare did not return a zone ID.'];
+        }
+
+        $recordResults = [];
+        $rootRecord = $this->upsertRecord($zoneId, [
+            'type' => 'A',
+            'name' => $domain,
+            'content' => $serverIp,
+            'ttl' => 1,
+            'proxied' => $this->defaultProxied(),
+        ]);
+        $recordResults[] = $rootRecord;
+
+        $wwwRecord = $this->upsertRecord($zoneId, [
+            'type' => 'CNAME',
+            'name' => 'www.' . $domain,
+            'content' => $domain,
+            'ttl' => 1,
+            'proxied' => $this->defaultProxied(),
+        ]);
+        $recordResults[] = $wwwRecord;
+
+        foreach ($this->defaultMxRecords($domain) as $record) {
+            $recordResults[] = $this->upsertRecord($zoneId, $record);
+        }
+
+        $spf = $this->defaultSpfRecord();
+        if ($spf !== '') {
+            $recordResults[] = $this->upsertTxtRecord($zoneId, $domain, $spf, true);
+        }
+
+        foreach ($this->defaultTxtRecords($domain) as $record) {
+            $recordResults[] = $this->upsertTxtRecord($zoneId, $record['name'], $record['content'], false);
+        }
+
+        $this->applyHttpsSettings($zoneId);
+
+        $failed = array_values(array_filter($recordResults, static fn (array $result): bool => empty($result['ok'])));
+        if ($failed) {
+            return [
+                'ok' => false,
+                'zone_id' => $zoneId,
+                'nameservers' => $zone['nameservers'] ?? [],
+                'records' => $recordResults,
+                'message' => (string) ($failed[0]['message'] ?? 'One or more DNS records could not be created.'),
+            ];
+        }
+
+        return [
+            'ok' => true,
+            'zone_id' => $zoneId,
+            'nameservers' => $zone['nameservers'] ?? [],
+            'records' => array_map(static fn (array $result): array => $result['record'] ?? [], $recordResults),
+        ];
+    }
+
+    private function findZone(string $domain): array
+    {
+        $domain = $this->normaliseDomain($domain);
+        if ($domain === '' || $this->token === '') {
+            return ['ok' => false, 'found' => false, 'message' => 'Cloudflare zone lookup is not configured.'];
+        }
+
+        $result = $this->api('GET', '/zones?name=' . rawurlencode($domain) . '&per_page=1');
+        if (!$result['ok']) {
+            return ['ok' => false, 'found' => false, 'message' => 'Cloudflare zone lookup failed.'];
+        }
+
+        $zones = $result['data']['result'] ?? [];
+        if (!is_array($zones) || $zones === []) {
+            return ['ok' => true, 'found' => false];
+        }
+
+        $zone = (array) $zones[0];
+        return [
+            'ok' => true,
+            'found' => true,
+            'zone_id' => (string) ($zone['id'] ?? ''),
+            'nameservers' => array_values(array_filter(array_map('strval', $zone['name_servers'] ?? []))),
+            'zone' => $zone,
+        ];
+    }
+
+    private function createZone(string $domain): array
+    {
+        if ($this->accountId === '') {
+            return ['ok' => false, 'found' => false, 'message' => 'Cloudflare account ID is required to create a new zone.'];
+        }
+
+        $result = $this->api('POST', '/zones', [
+            'name' => $domain,
+            'account' => ['id' => $this->accountId],
+            'type' => 'full',
+        ]);
+        if (!$result['ok']) {
+            return ['ok' => false, 'found' => false, 'message' => 'Cloudflare zone could not be created.'];
+        }
+
+        $zone = (array) ($result['data']['result'] ?? []);
+        return [
+            'ok' => true,
+            'found' => true,
+            'zone_id' => (string) ($zone['id'] ?? ''),
+            'nameservers' => array_values(array_filter(array_map('strval', $zone['name_servers'] ?? []))),
+            'zone' => $zone,
+        ];
+    }
+
+    private function upsertRecord(string $zoneId, array $payload): array
+    {
+        $name = (string) ($payload['name'] ?? '');
+        $type = strtoupper((string) ($payload['type'] ?? ''));
+        $existing = $this->api(
+            'GET',
+            '/zones/' . rawurlencode($zoneId) . '/dns_records?type=' . rawurlencode($type) . '&name=' . rawurlencode($name) . '&per_page=20'
+        );
+        if (!$existing['ok']) {
+            return ['ok' => false, 'message' => 'Existing DNS records could not be checked.'];
+        }
+
+        $records = is_array($existing['data']['result'] ?? null) ? $existing['data']['result'] : [];
+        $target = null;
+        foreach ($records as $record) {
+            $record = (array) $record;
+            $sameContent = (string) ($record['content'] ?? '') === (string) ($payload['content'] ?? '');
+            $samePriority = !isset($payload['priority']) || (int) ($record['priority'] ?? 0) === (int) $payload['priority'];
+            if ($sameContent && $samePriority) {
+                $target = $record;
+                break;
+            }
+        }
+        if ($target === null && $records) {
+            $target = (array) $records[0];
+        }
+
+        $method = 'POST';
+        $path = '/zones/' . rawurlencode($zoneId) . '/dns_records';
+        if (!empty($target['id'])) {
+            $method = 'PATCH';
+            $path .= '/' . rawurlencode((string) $target['id']);
+        }
+
+        $saved = $this->api($method, $path, $payload);
+        if (!$saved['ok']) {
+            return ['ok' => false, 'message' => 'DNS record could not be saved.'];
+        }
+
+        return ['ok' => true, 'record' => $this->normaliseRecord((array) ($saved['data']['result'] ?? []))];
+    }
+
+    private function upsertTxtRecord(string $zoneId, string $name, string $content, bool $replaceExistingSpf): array
+    {
+        $existing = $this->api(
+            'GET',
+            '/zones/' . rawurlencode($zoneId) . '/dns_records?type=TXT&name=' . rawurlencode($name) . '&per_page=50'
+        );
+        if (!$existing['ok']) {
+            return ['ok' => false, 'message' => 'Existing TXT records could not be checked.'];
+        }
+
+        $target = null;
+        foreach ((array) ($existing['data']['result'] ?? []) as $record) {
+            $record = (array) $record;
+            $recordContent = trim((string) ($record['content'] ?? ''));
+            if ($recordContent === $content || ($replaceExistingSpf && str_starts_with(strtolower($recordContent), 'v=spf1'))) {
+                $target = $record;
+                break;
+            }
+        }
+
+        $payload = ['type' => 'TXT', 'name' => $name, 'content' => $content, 'ttl' => 1];
+        $method = 'POST';
+        $path = '/zones/' . rawurlencode($zoneId) . '/dns_records';
+        if (!empty($target['id'])) {
+            $method = 'PATCH';
+            $path .= '/' . rawurlencode((string) $target['id']);
+        }
+
+        $saved = $this->api($method, $path, $payload);
+        if (!$saved['ok']) {
+            return ['ok' => false, 'message' => 'TXT record could not be saved.'];
+        }
+
+        return ['ok' => true, 'record' => $this->normaliseRecord((array) ($saved['data']['result'] ?? []))];
+    }
+
+    private function applyHttpsSettings(string $zoneId): void
+    {
+        $sslMode = strtolower(trim((string) ($this->settings['cloudflare_ssl_mode'] ?? env('CLOUDFLARE_SSL_MODE', 'full'))));
+        if (in_array($sslMode, ['off', 'flexible', 'full', 'strict', 'origin_pull'], true)) {
+            $this->api('PATCH', '/zones/' . rawurlencode($zoneId) . '/settings/ssl', ['value' => $sslMode]);
+        }
+
+        $alwaysHttps = filter_var(
+            $this->settings['cloudflare_always_use_https'] ?? env('CLOUDFLARE_ALWAYS_USE_HTTPS', true),
+            FILTER_VALIDATE_BOOLEAN,
+            FILTER_NULL_ON_FAILURE
+        );
+        if ($alwaysHttps !== null) {
+            $this->api('PATCH', '/zones/' . rawurlencode($zoneId) . '/settings/always_use_https', ['value' => $alwaysHttps ? 'on' : 'off']);
+        }
+    }
+
+    private function defaultMxRecords(string $domain): array
+    {
+        $raw = trim((string) (
+            $this->settings['default_mx_records']
+            ?? env('DEFAULT_MX_RECORDS', env('MAIL_MX_RECORDS', ''))
+        ));
+        if ($raw === '') {
+            return [];
+        }
+
+        $records = [];
+        foreach (preg_split('/[\r\n,]+/', $raw) ?: [] as $line) {
+            $line = trim($line);
+            if ($line === '') {
+                continue;
+            }
+
+            $parts = preg_split('/[\s|]+/', $line) ?: [];
+            $priority = 10;
+            $target = '';
+            if (isset($parts[0]) && ctype_digit($parts[0])) {
+                $priority = (int) $parts[0];
+                $target = (string) ($parts[1] ?? '');
+            } else {
+                $target = (string) ($parts[0] ?? '');
+                $priority = (int) ($parts[1] ?? 10);
+            }
+            $target = rtrim(str_replace('{domain}', $domain, strtolower($target)), '.');
+            if (!$this->validHostname($target)) {
+                continue;
+            }
+
+            $records[] = [
+                'type' => 'MX',
+                'name' => $domain,
+                'content' => $target,
+                'priority' => max(0, min(65535, $priority)),
+                'ttl' => 1,
+            ];
+        }
+
+        return $records;
+    }
+
+    private function defaultSpfRecord(): string
+    {
+        return trim((string) (
+            $this->settings['default_spf_record']
+            ?? env('DEFAULT_SPF_RECORD', env('MAIL_SPF_RECORD', ''))
+        ));
+    }
+
+    private function defaultTxtRecords(string $domain): array
+    {
+        $raw = trim((string) (
+            $this->settings['default_txt_records']
+            ?? env('DEFAULT_TXT_RECORDS', env('CLOUDFLARE_DEFAULT_TXT_RECORDS', ''))
+        ));
+        $dkim = trim((string) (
+            $this->settings['default_dkim_records']
+            ?? env('DEFAULT_DKIM_RECORDS', env('MAIL_DKIM_RECORDS', ''))
+        ));
+        $raw = trim($raw . "\n" . $dkim);
+        if ($raw === '') {
+            return [];
+        }
+
+        $records = [];
+        foreach (preg_split('/\R+/', $raw) ?: [] as $line) {
+            $line = trim($line);
+            if ($line === '' || !str_contains($line, '|')) {
+                continue;
+            }
+
+            [$name, $content] = array_map('trim', explode('|', $line, 2));
+            $name = str_replace('{domain}', $domain, strtolower($name));
+            if ($name === '@') {
+                $name = $domain;
+            } elseif (!str_ends_with($name, '.' . $domain) && $name !== $domain) {
+                $name .= '.' . $domain;
+            }
+            $content = str_replace('{domain}', $domain, $content);
+            if ($name !== '' && $content !== '') {
+                $records[] = ['name' => $name, 'content' => $content];
+            }
+        }
+
+        return $records;
+    }
+
+    private function defaultProxied(): bool
+    {
+        return filter_var(
+            $this->settings['cloudflare_proxy_default'] ?? env('CLOUDFLARE_PROXY_DEFAULT', false),
+            FILTER_VALIDATE_BOOLEAN,
+            FILTER_NULL_ON_FAILURE
+        ) ?? false;
     }
 
     private function validateRecord(string $domain, array $record): array
@@ -189,6 +519,15 @@ final class CloudflareDnsService
         return $name . '.' . $domain;
     }
 
+    private function normaliseDomain(string $domain): string
+    {
+        $domain = strtolower(trim($domain));
+        $domain = preg_replace('#^https?://#', '', $domain) ?: $domain;
+        $domain = preg_replace('#/.*$#', '', $domain) ?: $domain;
+        $domain = trim($domain, ". \t\n\r\0\x0B");
+        return $this->validHostname($domain) ? $domain : '';
+    }
+
     private function validHostname(string $hostname): bool
     {
         $hostname = strtolower(trim($hostname, ". \t\n\r\0\x0B"));
@@ -223,7 +562,13 @@ final class CloudflareDnsService
             }
         }
 
-        return trim((string) ($this->settings['cloudflare_zone_id'] ?? env('CLOUDFLARE_ZONE_ID', '')));
+        $configured = trim((string) ($this->settings['cloudflare_zone_id'] ?? env('CLOUDFLARE_ZONE_ID', '')));
+        if ($configured !== '') {
+            return $configured;
+        }
+
+        $zone = $this->findZone($domain);
+        return !empty($zone['ok']) && !empty($zone['found']) ? (string) ($zone['zone_id'] ?? '') : '';
     }
 
     private function api(string $method, string $path, array $payload = []): array

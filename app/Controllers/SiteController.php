@@ -479,6 +479,12 @@ final class SiteController extends Controller
             ? $this->checkoutPlanBySlug((string) ($data['hosting_plan'] ?? ''))
             : null;
         $whmPackage = $checkoutPlan ? $this->whmPackageForHostingPlan($checkoutPlan) : '';
+        if ((string) ($data['order_type'] ?? '') === 'website') {
+            $websiteConfig = $this->whmcs->checkoutConfig()['website_package'] ?? [];
+            if (!empty($websiteConfig['includes_hosting'])) {
+                $whmPackage = trim((string) ($websiteConfig['whm_package'] ?? env('WHMCS_WEBSITE_WHM_PACKAGE', 'planetic_agency')));
+            }
+        }
         $packageLabel = match ((string) ($data['order_type'] ?? '')) {
             'website' => 'Bespoke Website Development',
             'domain' => 'Domain Registration',

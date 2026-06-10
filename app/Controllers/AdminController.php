@@ -11,6 +11,8 @@ use App\Core\Upload;
 use App\Models\ContentRepository;
 use App\Models\ProvisioningRepository;
 use App\Models\TicketRepository;
+use App\Services\ProvisioningAutomationService;
+use App\Services\WhmcsService;
 
 final class AdminController extends Controller
 {
@@ -89,9 +91,15 @@ final class AdminController extends Controller
                     'admin_email', 'mail_from', 'phone', 'whatsapp_number', 'address',
                     'facebook_url', 'instagram_url', 'linkedin_url', 'x_url',
                     'whmcs_client_area_url', 'whmcs_api_url', 'whmcs_api_identifier', 'whmcs_api_secret', 'whmcs_payment_method', 'whmcs_payment_gateway_name', 'whmcs_domain_registrar', 'domain_hosting_pid', 'website_development_product_ids',
+                    'whm_hostname', 'whm_username', 'whm_api_token', 'default_hosting_server_ip', 'cpanel_login_url',
                     'google_analytics', 'recaptcha_site_key', 'recaptcha_secret_key',
-                    'cloudflare_zone_id', 'cloudflare_zone_map', 'cloudflare_api_token', 'default_order_url',
+                    'cloudflare_account_id', 'cloudflare_zone_id', 'cloudflare_zone_map', 'cloudflare_api_token', 'cloudflare_ssl_mode', 'default_mx_records', 'default_spf_record', 'default_dkim_records', 'default_order_url',
                 ]);
+                foreach (['whmcs_api_secret', 'whm_api_token', 'cloudflare_api_token', 'recaptcha_secret_key'] as $secretKey) {
+                    if (($data[$secretKey] ?? '') === '' && !empty($settings[$secretKey])) {
+                        $data[$secretKey] = (string) $settings[$secretKey];
+                    }
+                }
 
                 $data['recaptcha_enabled'] = $this->postedBool('recaptcha_enabled');
                 $data['logo_url'] = Upload::image('logo_upload', $data['logo_url'] ?: ($settings['logo_url'] ?? null));
@@ -138,14 +146,24 @@ final class AdminController extends Controller
                 ['name' => 'whmcs_domain_registrar', 'label' => 'WHMCS Registrar Module Name', 'type' => 'text'],
                 ['name' => 'domain_hosting_pid', 'label' => 'Domain + Hosting Product ID', 'type' => 'text'],
                 ['name' => 'website_development_product_ids', 'label' => 'Website Development Product IDs', 'type' => 'text'],
+                ['name' => 'whm_hostname', 'label' => 'WHM Hostname', 'type' => 'text'],
+                ['name' => 'whm_username', 'label' => 'WHM Reseller Username', 'type' => 'text'],
+                ['name' => 'whm_api_token', 'label' => 'WHM API Token', 'type' => 'password'],
+                ['name' => 'default_hosting_server_ip', 'label' => 'Default Hosting Server IP', 'type' => 'text'],
+                ['name' => 'cpanel_login_url', 'label' => 'cPanel Login URL', 'type' => 'url'],
                 ['name' => 'default_order_url', 'label' => 'Default Get Started URL', 'type' => 'url'],
                 ['name' => 'google_analytics', 'label' => 'Google Analytics / Tracking Code', 'type' => 'textarea'],
                 ['name' => 'recaptcha_enabled', 'label' => 'Enable Google reCAPTCHA', 'type' => 'checkbox'],
                 ['name' => 'recaptcha_site_key', 'label' => 'reCAPTCHA Site Key', 'type' => 'text'],
                 ['name' => 'recaptcha_secret_key', 'label' => 'reCAPTCHA Secret Key', 'type' => 'password'],
+                ['name' => 'cloudflare_account_id', 'label' => 'Cloudflare Account ID', 'type' => 'text'],
                 ['name' => 'cloudflare_zone_id', 'label' => 'Cloudflare Zone ID', 'type' => 'text'],
                 ['name' => 'cloudflare_zone_map', 'label' => 'Cloudflare Zone Map', 'type' => 'textarea', 'rows' => 3],
                 ['name' => 'cloudflare_api_token', 'label' => 'Cloudflare API Token', 'type' => 'password'],
+                ['name' => 'cloudflare_ssl_mode', 'label' => 'Cloudflare SSL Mode', 'type' => 'text'],
+                ['name' => 'default_mx_records', 'label' => 'Default MX Records', 'type' => 'textarea', 'rows' => 3],
+                ['name' => 'default_spf_record', 'label' => 'Default SPF TXT Record', 'type' => 'text'],
+                ['name' => 'default_dkim_records', 'label' => 'Default DKIM/TXT Records', 'type' => 'textarea', 'rows' => 4],
             ],
         ]);
     }
@@ -235,6 +253,54 @@ final class AdminController extends Controller
                 ['name' => 'is_active', 'label' => 'Active', 'type' => 'checkbox'],
             ],
         ]);
+    }
+
+    public function provisioning(): string
+    {
+        $this->requireAuth();
+
+        return $this->adminRender('admin/provisioning', [
+            'title' => 'Provisioning',
+            'items' => $this->provisioning->itemsForAdmin(),
+            'logs' => $this->provisioning->provisioningLogs(120),
+        ]);
+    }
+
+    public function retryProvisioning(string $id): string
+    {
+        $this->requireAuth();
+        $this->verifyCsrf();
+
+        $item = $this->provisioning->itemWithOrder((int) $id);
+        if (!$item) {
+            $this->flash('Provisioning item was not found.', 'error');
+            $this->redirect(url('/admin/provisioning'));
+        }
+
+        $this->provisioning->resetItemForRetry((int) $id);
+        $settings = $this->content->settings();
+        $whmcs = new WhmcsService($settings);
+
+        if (($item['item_type'] ?? '') === 'hosting') {
+            $result = (new ProvisioningAutomationService($whmcs, $this->provisioning, $settings))->retryHostingProvisioning($item);
+            $this->flash(!empty($result['ok']) ? 'Hosting provisioning retry completed.' : (string) ($result['message'] ?? 'Hosting provisioning retry failed.'), !empty($result['ok']) ? 'success' : 'error');
+            $this->redirect(url('/admin/provisioning'));
+        }
+
+        if (($item['item_type'] ?? '') === 'domain') {
+            $domainId = (int) ($item['whmcs_domain_id'] ?? 0);
+            $domain = (string) ($item['domain_name'] ?? '');
+            $result = $whmcs->domainRegister($domainId, $domain);
+            $this->provisioning->logStep((int) ($item['customer_order_id'] ?? 0), (int) $id, 'domain', 'domain_registration_retry', !empty($result['ok']) ? 'completed' : 'failed', (string) ($result['message'] ?? 'Domain registration retry requested.'), [
+                'domain' => $domain,
+                'whmcs_domain_id' => $domainId,
+            ]);
+            $this->flash(!empty($result['ok']) ? 'Domain registration retry was requested.' : (string) ($result['message'] ?? 'Domain registration retry failed.'), !empty($result['ok']) ? 'success' : 'error');
+            $this->redirect(url('/admin/provisioning'));
+        }
+
+        $this->flash('This provisioning item cannot be retried automatically.', 'error');
+        $this->redirect(url('/admin/provisioning'));
     }
 
     public function websiteProjects(): string
@@ -845,7 +911,7 @@ final class AdminController extends Controller
     public function export(): string
     {
         $this->requireAuth();
-        $tables = ['settings', 'seo_settings', 'hosting_plans', 'domain_tlds', 'website_packages', 'pages', 'testimonials', 'faqs', 'blog_categories', 'blog_posts', 'inquiries', 'customer_users', 'customer_orders', 'customer_provisioning_items', 'website_projects', 'support_tickets', 'support_ticket_messages', 'support_ticket_attachments', 'stripe_webhook_events'];
+        $tables = ['settings', 'seo_settings', 'hosting_plans', 'domain_tlds', 'website_packages', 'pages', 'testimonials', 'faqs', 'blog_categories', 'blog_posts', 'inquiries', 'customer_users', 'customer_orders', 'customer_provisioning_items', 'provisioning_logs', 'website_projects', 'support_tickets', 'support_ticket_messages', 'support_ticket_attachments', 'stripe_webhook_events'];
         $backup = [
             'generated_at' => date('c'),
             'site' => $this->content->settings()['company_name'] ?? 'Planetic Solutions',

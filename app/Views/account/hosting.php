@@ -26,6 +26,10 @@
                                     <div><dt>Next due date</dt><dd><?= e($service['next_due_date'] ?? 'Not available') ?></dd></div>
                                     <div><dt>Renewal amount</dt><dd><?= e($service['renewal_amount'] ?? 'Not available') ?></dd></div>
                                     <div><dt>Server status</dt><dd><?= e($service['server_status'] ?? 'Setup in Progress') ?></dd></div>
+                                    <div><dt>cPanel username</dt><dd><?= e($service['cpanel_username'] ?: 'Not available yet') ?></dd></div>
+                                    <div><dt>Server IP</dt><dd><?= e($service['server_ip'] ?: 'Not available yet') ?></dd></div>
+                                    <div><dt>WHM package</dt><dd><?= e($service['whm_package'] ?: 'Not available') ?></dd></div>
+                                    <div><dt>Cloudflare DNS</dt><dd><?= e($service['cloudflare_status'] ?: 'Pending') ?></dd></div>
                                 </dl>
                                 <?php if (!empty($service['cpanel_url'])): ?>
                                     <a class="btn btn-outline btn-small" href="<?= e($service['cpanel_url']) ?>" rel="noopener">Open cPanel</a>

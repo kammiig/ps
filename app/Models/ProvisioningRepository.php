@@ -23,6 +23,8 @@ final class ProvisioningRepository
     ];
 
     private PDO $db;
+    private ?array $customerProvisioningColumns = null;
+    private ?bool $provisioningLogsAvailable = null;
 
     public function __construct()
     {
@@ -50,13 +52,13 @@ final class ProvisioningRepository
             ]);
         }
 
-        if (in_array($type, ['hosting', 'bundle'], true)) {
+        if (in_array($type, ['hosting', 'bundle'], true) || ($type === 'website' && $whmPackage !== '')) {
             $slug = trim((string) ($order['hosting_plan_slug'] ?? ''));
-            $itemKey = strtolower(($slug !== '' ? $slug : 'hosting') . ':' . ($domain !== '' ? $domain : 'no-domain'));
+            $itemKey = strtolower(($slug !== '' ? $slug : ($type === 'website' ? 'website-hosting' : 'hosting')) . ':' . ($domain !== '' ? $domain : 'no-domain'));
             $this->upsertItem($order, [
                 'item_type' => 'hosting',
                 'item_key' => $itemKey,
-                'display_name' => trim((string) ($order['package_label'] ?? '')) ?: 'Hosting Package',
+                'display_name' => trim((string) ($order['package_label'] ?? '')) ?: ($type === 'website' ? 'Website Hosting' : 'Hosting Package'),
                 'domain_name' => $domain,
                 'hosting_plan_slug' => $slug,
                 'whm_package' => $whmPackage,
@@ -616,6 +618,298 @@ final class ProvisioningRepository
         }
     }
 
+    public function markHostingAccountProvisioned(array $order, int $serviceId, string $whmPackage, string $username = '', string $serverIp = '', string $encryptedPassword = ''): void
+    {
+        $orderId = (int) ($order['id'] ?? $order['customer_order_id'] ?? 0);
+        if ($orderId <= 0) {
+            return;
+        }
+
+        $columns = $this->customerProvisioningColumns();
+        $set = [
+            'whmcs_service_id = COALESCE(NULLIF(:service_id, 0), whmcs_service_id)',
+            'payment_status = "paid"',
+            'provisioning_status = "active"',
+            'hosting_setup_status = "Setup Completed"',
+            'whm_package = COALESCE(NULLIF(:whm_package, ""), whm_package)',
+            'setup_issue_public = NULL',
+            'setup_issue_internal = NULL',
+            'provisioned_at = COALESCE(provisioned_at, NOW())',
+            'updated_at = NOW()',
+        ];
+        $params = [
+            'order_id' => $orderId,
+            'service_id' => $serviceId,
+            'whm_package' => $whmPackage,
+        ];
+
+        foreach ([
+            'cpanel_username' => substr($username, 0, 16),
+            'server_ip' => substr($serverIp, 0, 45),
+            'cpanel_password_encrypted' => $encryptedPassword,
+        ] as $field => $value) {
+            if (!isset($columns[$field]) || $value === '') {
+                continue;
+            }
+            $set[] = $field . ' = COALESCE(NULLIF(:' . $field . ', ""), ' . $field . ')';
+            $params[$field] = $value;
+        }
+
+        $stmt = $this->db->prepare(
+            'UPDATE customer_provisioning_items
+             SET ' . implode(', ', $set) . '
+             WHERE customer_order_id = :order_id AND item_type = "hosting"'
+        );
+        $stmt->execute($params);
+
+        $aggregate = [
+            'provisioning_status' => 'completed',
+            'hosting_setup_status' => 'Setup Completed',
+            'whm_package' => $whmPackage !== '' ? $whmPackage : null,
+            'provisioned_at' => date('Y-m-d H:i:s'),
+            'provisioning_last_error' => null,
+        ];
+        $this->markOrderAggregate($orderId, $aggregate);
+    }
+
+    public function markCpanelPasswordSent(int $orderId, string $domain): void
+    {
+        if ($orderId <= 0 || !isset($this->customerProvisioningColumns()['cpanel_password_sent_at'])) {
+            return;
+        }
+
+        $stmt = $this->db->prepare(
+            'UPDATE customer_provisioning_items
+             SET cpanel_password_sent_at = COALESCE(cpanel_password_sent_at, NOW()), updated_at = NOW()
+             WHERE customer_order_id = :order_id AND item_type = "hosting"
+               AND (:domain = "" OR LOWER(domain_name) = LOWER(:domain))'
+        );
+        $stmt->execute(['order_id' => $orderId, 'domain' => $domain]);
+    }
+
+    public function markCloudflareProvisioned(array $order, string $domain, string $zoneId, array $nameservers, array $records = []): void
+    {
+        $orderId = (int) ($order['id'] ?? $order['customer_order_id'] ?? 0);
+        $domain = strtolower(trim($domain));
+        if ($orderId <= 0 || $domain === '') {
+            return;
+        }
+
+        $columns = $this->customerProvisioningColumns();
+        $fields = [
+            'cloudflare_zone_id' => $zoneId,
+            'cloudflare_status' => 'Active',
+            'cloudflare_nameservers_json' => json_encode(array_values($nameservers), JSON_UNESCAPED_SLASHES),
+            'dns_records_json' => json_encode(array_values($records), JSON_UNESCAPED_SLASHES),
+            'cloudflare_last_error' => null,
+        ];
+        $set = ['updated_at = NOW()'];
+        $params = ['order_id' => $orderId, 'domain' => $domain];
+        foreach ($fields as $field => $value) {
+            if (!isset($columns[$field])) {
+                continue;
+            }
+            $set[] = $field . ' = :' . $field;
+            $params[$field] = is_string($value) ? $value : $value;
+        }
+        if (isset($columns['dns_attempts'])) {
+            $set[] = 'dns_attempts = dns_attempts + 1';
+        }
+        if (isset($columns['dns_last_attempt_at'])) {
+            $set[] = 'dns_last_attempt_at = NOW()';
+        }
+        if (isset($columns['nameservers_json']) && $nameservers) {
+            $set[] = 'nameservers_json = COALESCE(NULLIF(:nameservers_json, "[]"), nameservers_json)';
+            $params['nameservers_json'] = json_encode(array_values($nameservers), JSON_UNESCAPED_SLASHES);
+        }
+
+        if (count($set) <= 1) {
+            return;
+        }
+
+        $stmt = $this->db->prepare(
+            'UPDATE customer_provisioning_items
+             SET ' . implode(', ', $set) . '
+             WHERE customer_order_id = :order_id
+               AND LOWER(domain_name) = :domain
+               AND item_type IN ("domain", "hosting")'
+        );
+        $stmt->execute($params);
+    }
+
+    public function markDnsIssue(array $order, string $domain, string $message): void
+    {
+        $orderId = (int) ($order['id'] ?? $order['customer_order_id'] ?? 0);
+        $domain = strtolower(trim($domain));
+        if ($orderId <= 0 || $domain === '') {
+            return;
+        }
+
+        $columns = $this->customerProvisioningColumns();
+        $set = ['updated_at = NOW()'];
+        $params = [
+            'order_id' => $orderId,
+            'domain' => $domain,
+        ];
+
+        if (isset($columns['cloudflare_status'])) {
+            $set[] = 'cloudflare_status = "Failed"';
+        }
+        if (isset($columns['cloudflare_last_error'])) {
+            $set[] = 'cloudflare_last_error = :message';
+            $params['message'] = substr($message, 0, 1000);
+        }
+        if (isset($columns['dns_attempts'])) {
+            $set[] = 'dns_attempts = dns_attempts + 1';
+        }
+        if (isset($columns['dns_last_attempt_at'])) {
+            $set[] = 'dns_last_attempt_at = NOW()';
+        }
+
+        if (count($set) <= 1) {
+            return;
+        }
+
+        $stmt = $this->db->prepare(
+            'UPDATE customer_provisioning_items
+             SET ' . implode(', ', $set) . '
+             WHERE customer_order_id = :order_id
+               AND LOWER(domain_name) = :domain
+               AND item_type IN ("domain", "hosting")'
+        );
+        $stmt->execute($params);
+    }
+
+    public function itemWithOrder(int $id): ?array
+    {
+        if ($id <= 0) {
+            return null;
+        }
+
+        $stmt = $this->db->prepare(
+            'SELECT i.*,
+                    o.public_token AS order_public_token,
+                    o.order_type AS order_type,
+                    o.selected_domain AS selected_domain,
+                    o.hosting_plan_slug AS order_hosting_plan_slug,
+                    o.package_label AS order_package_label,
+                    o.billing_cycle AS order_billing_cycle,
+                    o.payment_status AS order_payment_status,
+                    o.stripe_payment_reference AS order_stripe_payment_reference,
+                    o.paid_at AS order_paid_at
+             FROM customer_provisioning_items i
+             LEFT JOIN customer_orders o ON o.id = i.customer_order_id
+             WHERE i.id = :id
+             LIMIT 1'
+        );
+        $stmt->execute(['id' => $id]);
+        $item = $stmt->fetch();
+        return $item ?: null;
+    }
+
+    public function resetItemForRetry(int $id): void
+    {
+        if ($id <= 0) {
+            return;
+        }
+
+        $stmt = $this->db->prepare(
+            'UPDATE customer_provisioning_items
+             SET provisioning_status = "processing",
+                 hosting_setup_status = CASE WHEN item_type = "hosting" THEN "Setup in Progress" ELSE hosting_setup_status END,
+                 domain_registration_status = CASE WHEN item_type = "domain" THEN "Processing" ELSE domain_registration_status END,
+                 setup_issue_public = NULL,
+                 setup_issue_internal = NULL,
+                 updated_at = NOW()
+             WHERE id = :id'
+        );
+        $stmt->execute(['id' => $id]);
+    }
+
+    public function itemsForAdmin(int $limit = 200): array
+    {
+        $stmt = $this->db->prepare(
+            'SELECT i.*, u.email AS customer_email, CONCAT(u.first_name, " ", u.last_name) AS customer_name
+             FROM customer_provisioning_items i
+             LEFT JOIN customer_users u ON u.id = i.customer_user_id
+             ORDER BY COALESCE(i.updated_at, i.created_at) DESC, i.id DESC
+             LIMIT ' . max(1, min(500, $limit))
+        );
+        $stmt->execute();
+        return $stmt->fetchAll();
+    }
+
+    public function provisioningLogs(int $limit = 200, ?int $itemId = null): array
+    {
+        if (!$this->provisioningLogsAvailable()) {
+            return [];
+        }
+
+        $params = [];
+        $where = '';
+        if ($itemId !== null && $itemId > 0) {
+            $where = 'WHERE provisioning_item_id = :item_id';
+            $params['item_id'] = $itemId;
+        }
+
+        $stmt = $this->db->prepare(
+            'SELECT *
+             FROM provisioning_logs
+             ' . $where . '
+             ORDER BY id DESC
+             LIMIT ' . max(1, min(500, $limit))
+        );
+        $stmt->execute($params);
+        return $stmt->fetchAll();
+    }
+
+    public function logStep(?int $orderId, ?int $itemId, string $itemType, string $event, string $status, string $message, array $context = []): void
+    {
+        $safeContext = $context;
+        unset(
+            $safeContext['password'],
+            $safeContext['cpanel_password'],
+            $safeContext['api_token'],
+            $safeContext['secret'],
+            $safeContext['stripe_secret'],
+            $safeContext['whm_api_token'],
+            $safeContext['cloudflare_api_token']
+        );
+
+        if ($this->provisioningLogsAvailable()) {
+            try {
+                $stmt = $this->db->prepare(
+                    'INSERT INTO provisioning_logs
+                     (customer_order_id, provisioning_item_id, item_type, event, status, message, context_json, created_at)
+                     VALUES
+                     (:order_id, :item_id, :item_type, :event, :status, :message, :context_json, NOW())'
+                );
+                $stmt->execute([
+                    'order_id' => $orderId ?: null,
+                    'item_id' => $itemId ?: null,
+                    'item_type' => in_array($itemType, ['domain', 'hosting', 'payment', 'dns', 'whmcs'], true) ? $itemType : 'whmcs',
+                    'event' => substr($event, 0, 120),
+                    'status' => substr($status, 0, 40),
+                    'message' => substr($message, 0, 1000),
+                    'context_json' => json_encode($safeContext, JSON_UNESCAPED_SLASHES),
+                ]);
+                return;
+            } catch (\Throwable) {
+                $this->provisioningLogsAvailable = false;
+            }
+        }
+
+        $dir = STORAGE_PATH . '/logs';
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0755, true);
+        }
+        @file_put_contents(
+            $dir . '/provisioning.log',
+            '[' . date('c') . '] ' . $event . ' ' . $status . ' ' . $message . ' ' . json_encode($safeContext, JSON_UNESCAPED_SLASHES) . PHP_EOL,
+            FILE_APPEND
+        );
+    }
+
     private function ensureWebsiteProject(array $order): void
     {
         $orderId = (int) ($order['id'] ?? 0);
@@ -766,6 +1060,42 @@ final class ProvisioningRepository
             return $columns;
         } catch (\Throwable) {
             return [];
+        }
+    }
+
+    private function customerProvisioningColumns(): array
+    {
+        if ($this->customerProvisioningColumns !== null) {
+            return $this->customerProvisioningColumns;
+        }
+
+        try {
+            $stmt = $this->db->query('SHOW COLUMNS FROM customer_provisioning_items');
+            $columns = [];
+            foreach ($stmt->fetchAll() as $row) {
+                $field = (string) ($row['Field'] ?? $row['field'] ?? '');
+                if ($field !== '') {
+                    $columns[$field] = true;
+                }
+            }
+
+            return $this->customerProvisioningColumns = $columns;
+        } catch (\Throwable) {
+            return $this->customerProvisioningColumns = [];
+        }
+    }
+
+    private function provisioningLogsAvailable(): bool
+    {
+        if ($this->provisioningLogsAvailable !== null) {
+            return $this->provisioningLogsAvailable;
+        }
+
+        try {
+            $stmt = $this->db->query('SHOW TABLES LIKE "provisioning_logs"');
+            return $this->provisioningLogsAvailable = (bool) $stmt->fetchColumn();
+        } catch (\Throwable) {
+            return $this->provisioningLogsAvailable = false;
         }
     }
 

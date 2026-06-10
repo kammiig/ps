@@ -75,6 +75,8 @@ $router->get('/admin/homepage', [AdminController::class, 'homepage']);
 $router->post('/admin/homepage', [AdminController::class, 'homepage']);
 $router->get('/admin/package', [AdminController::class, 'package']);
 $router->post('/admin/package', [AdminController::class, 'package']);
+$router->get('/admin/provisioning', [AdminController::class, 'provisioning']);
+$router->post('/admin/provisioning/{id}/retry', [AdminController::class, 'retryProvisioning']);
 $router->get('/admin/website-projects', [AdminController::class, 'websiteProjects']);
 $router->get('/admin/website-projects/{id}/edit', [AdminController::class, 'websiteProjectForm']);
 $router->post('/admin/website-projects/{id}/edit', [AdminController::class, 'websiteProjectForm']);

@@ -13,6 +13,7 @@ DROP TABLE IF EXISTS hosting_plans;
 DROP TABLE IF EXISTS seo_settings;
 DROP TABLE IF EXISTS settings;
 DROP TABLE IF EXISTS website_projects;
+DROP TABLE IF EXISTS provisioning_logs;
 DROP TABLE IF EXISTS customer_provisioning_items;
 DROP TABLE IF EXISTS support_ticket_attachments;
 DROP TABLE IF EXISTS support_ticket_messages;
@@ -136,6 +137,10 @@ CREATE TABLE customer_provisioning_items (
     hosting_setup_status VARCHAR(80) NULL,
     whmcs_domain_id INT UNSIGNED NULL,
     whmcs_service_id INT UNSIGNED NULL,
+    cpanel_username VARCHAR(16) NULL,
+    cpanel_password_encrypted TEXT NULL,
+    cpanel_password_sent_at DATETIME NULL,
+    server_ip VARCHAR(45) NULL,
     registration_date DATE NULL,
     expiry_date DATE NULL,
     renewal_date DATE NULL,
@@ -143,6 +148,13 @@ CREATE TABLE customer_provisioning_items (
     next_due_date DATE NULL,
     renewal_amount DECIMAL(12,2) NULL,
     nameservers_json TEXT NULL,
+    cloudflare_zone_id VARCHAR(80) NULL,
+    cloudflare_status VARCHAR(80) NULL,
+    cloudflare_nameservers_json TEXT NULL,
+    cloudflare_last_error TEXT NULL,
+    dns_records_json LONGTEXT NULL,
+    dns_attempts INT UNSIGNED NOT NULL DEFAULT 0,
+    dns_last_attempt_at DATETIME NULL,
     setup_issue_public VARCHAR(255) NULL,
     setup_issue_internal TEXT NULL,
     stripe_reference VARCHAR(160) NULL,
@@ -159,6 +171,23 @@ CREATE TABLE customer_provisioning_items (
     INDEX customer_provisioning_status_index (provisioning_status),
     CONSTRAINT customer_provisioning_order_fk FOREIGN KEY (customer_order_id) REFERENCES customer_orders(id) ON DELETE CASCADE,
     CONSTRAINT customer_provisioning_user_fk FOREIGN KEY (customer_user_id) REFERENCES customer_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE provisioning_logs (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    customer_order_id INT UNSIGNED NULL,
+    provisioning_item_id INT UNSIGNED NULL,
+    item_type ENUM('domain', 'hosting', 'payment', 'dns', 'whmcs') NOT NULL DEFAULT 'whmcs',
+    event VARCHAR(120) NOT NULL,
+    status VARCHAR(40) NOT NULL,
+    message TEXT NULL,
+    context_json LONGTEXT NULL,
+    created_at DATETIME NOT NULL,
+    INDEX provisioning_logs_order_index (customer_order_id),
+    INDEX provisioning_logs_item_index (provisioning_item_id),
+    INDEX provisioning_logs_event_index (event),
+    CONSTRAINT provisioning_logs_order_fk FOREIGN KEY (customer_order_id) REFERENCES customer_orders(id) ON DELETE SET NULL,
+    CONSTRAINT provisioning_logs_item_fk FOREIGN KEY (provisioning_item_id) REFERENCES customer_provisioning_items(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE website_projects (
@@ -434,14 +463,25 @@ INSERT INTO settings (setting_key, setting_value, updated_at) VALUES
 ('whmcs_api_secret', '', NOW()),
 ('whmcs_payment_method', 'stripe', NOW()),
 ('whmcs_payment_gateway_name', '', NOW()),
+('whm_hostname', '', NOW()),
+('whm_username', '', NOW()),
+('whm_api_token', '', NOW()),
+('default_hosting_server_ip', '', NOW()),
+('cpanel_login_url', '', NOW()),
 ('domain_hosting_pid', '2', NOW()),
 ('default_order_url', '/checkout', NOW()),
 ('google_analytics', '', NOW()),
 ('recaptcha_enabled', '0', NOW()),
 ('recaptcha_site_key', '', NOW()),
 ('recaptcha_secret_key', '', NOW()),
+('cloudflare_account_id', '', NOW()),
 ('cloudflare_zone_id', '', NOW()),
+('cloudflare_zone_map', '', NOW()),
 ('cloudflare_api_token', '', NOW()),
+('cloudflare_ssl_mode', 'full', NOW()),
+('default_mx_records', '', NOW()),
+('default_spf_record', '', NOW()),
+('default_dkim_records', '', NOW()),
 ('home_hero_title', 'Fast, Secure & Affordable Web Hosting for Your Business', NOW()),
 ('home_hero_subtitle', 'Planetic Solutions provides reliable hosting, domain registration and complete business websites with secure on-site billing, cPanel access and Cloudflare CDN support.', NOW()),
 ('home_primary_cta_text', 'Search Domain', NOW()),

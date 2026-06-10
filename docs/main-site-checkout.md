@@ -8,6 +8,9 @@ This project keeps the buying experience on `https://planeticsolution.com/` whil
 app/config/whmcs.php                  Server-side WHMCS/product/domain config
 app/Services/WhmcsService.php         WHMCS API wrapper
 app/Services/StripeService.php        Server-side Stripe PaymentIntent and webhook helper
+app/Services/WhmAccountService.php    Direct WHM/cPanel account lookup/create fallback
+app/Services/ProvisioningAutomationService.php Paid hosting, WHM, Cloudflare and retry orchestration
+app/Services/CloudflareDnsService.php Cloudflare zone/DNS automation and DNS management
 app/Controllers/SiteController.php    Domain API, checkout page and order submit endpoint
 app/Controllers/PaymentController.php On-site invoice payment and Stripe webhook endpoint
 app/Controllers/AccountController.php Customer login, dashboard, domains, hosting, website projects, billing and profile
@@ -42,6 +45,8 @@ GET  /account/services
 GET  /account/billing
 GET  /account/profile
 GET  /admin/website-projects
+GET  /admin/provisioning
+POST /admin/provisioning/{id}/retry
 ```
 
 ## WHMCS API Actions Used
@@ -58,6 +63,7 @@ GET  /admin/website-projects
 - `AddInvoicePayment` records verified Stripe payments against the existing WHMCS invoice.
 - `AcceptOrder` runs only after verified payment, with automatic setup enabled and registrar submission requested.
 - `ModuleCreate` is used only after verified payment for paid hosting services that still need setup.
+- `UpdateClientProduct` is used after direct WHM fallback to store the generated cPanel username/IP on the WHMCS service when possible.
 - `CreateSsoToken` exists for safe WHMCS SSO flows, but cPanel buttons are only shown when a safe URL is available.
 
 ## Product ID Mapping
@@ -86,10 +92,26 @@ WHMCS_ECOMMERCE_WHM_PACKAGE=planetic_agency
 WHMCS_WEBSITE_PACKAGE_PID=5
 WHMCS_WEBSITE_PRICE_OVERRIDE=199.00
 WHMCS_WEBSITE_REGISTER_DOMAIN=true
+WHMCS_WEBSITE_INCLUDES_HOSTING=false
+WHMCS_WEBSITE_WHM_PACKAGE=planetic_agency
 WHMCS_WEBSITE_DOMAIN_PRICE_OVERRIDE=0.00
 STRIPE_PUBLISHABLE_KEY=
 STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
+WHM_HOSTNAME=server.example.com
+WHM_USERNAME=reseller_username
+WHM_API_TOKEN=
+WHM_SSL_VERIFY=true
+DEFAULT_HOSTING_SERVER_IP=
+CPANEL_LOGIN_URL=https://server.example.com:2083
+CPANEL_CREDENTIAL_KEY=
+CLOUDFLARE_API_TOKEN=
+CLOUDFLARE_ACCOUNT_ID=
+CLOUDFLARE_SSL_MODE=full
+CLOUDFLARE_ALWAYS_USE_HTTPS=true
+DEFAULT_MX_RECORDS=
+DEFAULT_SPF_RECORD=
+DEFAULT_DKIM_RECORDS=
 ```
 
 Or edit `app/config/whmcs.php` if you prefer file-based mapping. Product IDs must match the IDs in WHMCS Admin > Products/Services.
@@ -130,6 +152,19 @@ On `payment_intent.succeeded`, the webhook verifies the Stripe signature, checks
 
 After the WHMCS invoice is confirmed paid, the site marks the local payment record paid, accepts the WHMCS order, requests registrar submission for domains, requests hosting module creation for paid hosting services, creates or updates website project records, and clears customer account WHMCS cache.
 
+For hosting orders, the post-payment flow is:
+
+1. Create/update local provisioning records.
+2. Accept the WHMCS order with `autosetup`, `sendregistrar` and `sendemail`.
+3. Sync domain status from WHMCS without replacing the working registrar flow.
+4. Load WHMCS services for the paid order.
+5. Call `ModuleCreate` for hosting services that are not active and have no username.
+6. If `ModuleCreate` fails, use direct WHM API fallback when `WHM_HOSTNAME`, `WHM_USERNAME`, `WHM_API_TOKEN`, `DEFAULT_HOSTING_SERVER_IP` and the package mapping are configured.
+7. Store cPanel username, encrypted initial password, server IP, WHM package, Cloudflare zone ID, Cloudflare nameservers and DNS status in `customer_provisioning_items`.
+8. Email the initial cPanel password once after direct WHM account creation. The password is not shown in browser UI.
+9. Create or find the Cloudflare zone, upsert default A/CNAME/MX/TXT records, apply HTTPS settings and update registrar nameservers through WHMCS when the domain is available.
+10. Write audit entries to `provisioning_logs`, visible in Admin > Provisioning.
+
 On `payment_intent.payment_failed`, the local order is marked failed and the existing WHMCS invoice remains unpaid. Retry uses the same local invoice mapping.
 
 ## Setup Steps
@@ -144,10 +179,12 @@ On `payment_intent.payment_failed`, the local order is marked failed and the exi
 8. Configure domain registrar/TLD pricing in WHMCS.
 9. Upload the site to cPanel and keep `.env`, `app/`, `database/` and `storage/` protected by `.htaccess`.
 10. Import `database/stripe_account_update.sql` if this is an existing installation.
-11. Import `database/customer_order_checkout_metadata.sql` and `database/provisioning_and_website_projects.sql` for the local checkout/provisioning records.
+11. Import `database/customer_order_checkout_metadata.sql`, `database/provisioning_and_website_projects.sql` and `database/provisioning_automation_update.sql` for the local checkout/provisioning records.
 12. In WHMCS, confirm each hosting product is assigned to the correct cPanel package: Starter `planetic_starter`, Business `planetic_business`, Pro `planetic_pro`, Agency/Ecommerce `planetic_agency`.
 13. Confirm WHMCS domain registrar modules and TLD auto-registration settings are configured.
-14. Test the flow with Stripe test mode and low-value WHMCS products first.
+14. Confirm the WHM API token belongs to a reseller/root user allowed to create accounts with those packages.
+15. Confirm the Cloudflare API token can create zones and edit DNS under `CLOUDFLARE_ACCOUNT_ID`.
+16. Test the flow with Stripe test mode and low-value WHMCS products first.
 
 If domain search or checkout says WHMCS is not responding, check `storage/logs/whmcs-api.log`. The website calls WHMCS server-side using cURL first, then a PHP stream fallback. Most failures are caused by missing API credentials, WHMCS API IP restrictions, an incorrect `WHMCS_API_URL`, or cPanel outbound HTTPS/SSL issues.
 
@@ -202,10 +239,13 @@ These shortcodes send visitors to the main website checkout. They do not store W
 - Submit hosting-only with an existing domain.
 - Submit domain + hosting.
 - Submit the £199 website package.
+- Submit a website package with `WHMCS_WEBSITE_INCLUDES_HOSTING=true` if that product includes hosting.
 - Pay with Stripe test card `4242 4242 4242 4242` and confirm the Stripe webhook records payment in WHMCS.
 - Confirm the paid WHMCS order is accepted only after verified payment.
 - Confirm paid domain orders appear in `/account/domains`.
-- Confirm paid hosting orders appear in `/account/hosting` with the expected WHM package label.
+- Confirm paid hosting orders appear in `/account/hosting` with the expected WHM package label, cPanel username and server IP.
+- Confirm Cloudflare zone ID/nameservers appear in Admin > Provisioning and customer domain views.
+- Confirm default DNS records are present in Cloudflare: A `@`, CNAME `www`, plus configured MX/SPF/DKIM/TXT records.
 - Confirm paid website package orders appear in `/account/website-development`.
 - Update a website project in `/admin/website-projects` and confirm only the customer-facing note appears in the customer account.
 - Test failed payment with Stripe test card `4000 0000 0000 9995` and confirm retry uses the same invoice.
@@ -213,4 +253,8 @@ These shortcodes send visitors to the main website checkout. They do not store W
 - Use Pay Now on an unpaid invoice from `/account/billing` and confirm it opens on-site Stripe payment.
 - Confirm unpaid orders are not provisioned.
 - Refresh `/checkout/success`, retry the webhook event, and confirm duplicate domain/hosting/project records are not created.
+- Replay the same Stripe webhook event and confirm no duplicate cPanel account, Cloudflare zone or DNS records are created.
+- Temporarily use an invalid WHM package/token and confirm hosting is marked Action Required with an admin log entry.
+- Temporarily use an invalid Cloudflare token and confirm hosting remains active while Cloudflare DNS shows failed/pending retry.
+- Use Admin > Provisioning > Retry on a failed hosting item and confirm it reuses the same idempotent provisioning path.
 - Check `storage/logs/whmcs-api.log` for safe error messages if an API call fails.

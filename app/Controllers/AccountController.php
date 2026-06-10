@@ -752,6 +752,8 @@ final class AccountController extends Controller
             if (isset($rows[$key])) {
                 $rows[$key]['setup_issue'] = $row['setup_issue'] ?: $rows[$key]['setup_issue'];
                 $rows[$key]['registrar_status'] = $row['registrar_status'] ?: $rows[$key]['registrar_status'];
+                $rows[$key]['cloudflare_status'] = $row['cloudflare_status'] ?: ($rows[$key]['cloudflare_status'] ?? '');
+                $rows[$key]['cloudflare_zone_id'] = $row['cloudflare_zone_id'] ?: ($rows[$key]['cloudflare_zone_id'] ?? '');
                 if ($row['nameservers']) {
                     $rows[$key]['nameservers'] = $row['nameservers'];
                 }
@@ -789,6 +791,9 @@ final class AccountController extends Controller
             if (isset($rows[$key])) {
                 $rows[$key]['setup_issue'] = $row['setup_issue'] ?: $rows[$key]['setup_issue'];
                 $rows[$key]['whm_package'] = $row['whm_package'] ?: $rows[$key]['whm_package'];
+                $rows[$key]['cpanel_username'] = $row['cpanel_username'] ?: ($rows[$key]['cpanel_username'] ?? '');
+                $rows[$key]['server_ip'] = $row['server_ip'] ?: ($rows[$key]['server_ip'] ?? '');
+                $rows[$key]['cloudflare_status'] = $row['cloudflare_status'] ?: ($rows[$key]['cloudflare_status'] ?? '');
                 continue;
             }
             $rows[$key] = $row;
@@ -864,6 +869,8 @@ final class AccountController extends Controller
             'renewal_amount' => $this->amountLabel($domain['recurringamount'] ?? $domain['renewalamount'] ?? null),
             'nameservers' => $nameservers,
             'registrar_status' => strtolower($status) === 'active' ? 'Registered' : $this->friendlyDomainStatus($status),
+            'cloudflare_status' => '',
+            'cloudflare_zone_id' => '',
             'setup_issue' => '',
             'dns_url' => $this->dnsUrlForDomain((string) ($domain['domainname'] ?? $domain['domain'] ?? '')),
         ];
@@ -875,6 +882,10 @@ final class AccountController extends Controller
         if (!is_array($nameservers) || !$nameservers) {
             $nameservers = array_values(array_filter($this->whmcs->checkoutConfig()['nameservers'] ?? []));
         }
+        $cloudflareNameservers = json_decode((string) ($item['cloudflare_nameservers_json'] ?? '[]'), true);
+        if (is_array($cloudflareNameservers) && $cloudflareNameservers) {
+            $nameservers = $cloudflareNameservers;
+        }
 
         return [
             'domain_name' => (string) ($item['domain_name'] ?? 'Domain'),
@@ -885,6 +896,8 @@ final class AccountController extends Controller
             'renewal_amount' => $this->amountLabel($item['renewal_amount'] ?? null),
             'nameservers' => array_values(array_filter(array_map('strval', $nameservers))),
             'registrar_status' => $this->friendlyLocalProvisioningStatus((string) ($item['payment_status'] ?? ''), (string) ($item['domain_registration_status'] ?? ''), 'Processing'),
+            'cloudflare_status' => (string) ($item['cloudflare_status'] ?? ''),
+            'cloudflare_zone_id' => (string) ($item['cloudflare_zone_id'] ?? ''),
             'setup_issue' => (string) ($item['setup_issue_public'] ?? ''),
             'dns_url' => $this->dnsUrlForDomain((string) ($item['domain_name'] ?? '')),
         ];
@@ -904,7 +917,10 @@ final class AccountController extends Controller
             'renewal_amount' => $this->amountLabel($service['recurringamount'] ?? $service['amount'] ?? null),
             'server_status' => $status,
             'whm_package' => (string) ($localItem['whm_package'] ?? $this->defaultWhmPackageForText($packageName)),
-            'cpanel_url' => '',
+            'cpanel_username' => (string) ($localItem['cpanel_username'] ?? $service['username'] ?? ''),
+            'server_ip' => (string) ($localItem['server_ip'] ?? $service['dedicatedip'] ?? $service['serverip'] ?? ''),
+            'cloudflare_status' => (string) ($localItem['cloudflare_status'] ?? ''),
+            'cpanel_url' => $this->cpanelUrl(),
             'setup_issue' => (string) ($localItem['setup_issue_public'] ?? ''),
         ];
     }
@@ -922,7 +938,10 @@ final class AccountController extends Controller
             'renewal_amount' => $this->amountLabel($item['renewal_amount'] ?? null),
             'server_status' => $this->friendlyProvisioningStatus((string) ($item['provisioning_status'] ?? 'processing')),
             'whm_package' => (string) ($item['whm_package'] ?? $this->defaultWhmPackageForText($packageName)),
-            'cpanel_url' => '',
+            'cpanel_username' => (string) ($item['cpanel_username'] ?? ''),
+            'server_ip' => (string) ($item['server_ip'] ?? ''),
+            'cloudflare_status' => (string) ($item['cloudflare_status'] ?? ''),
+            'cpanel_url' => $this->cpanelUrl(),
             'setup_issue' => (string) ($item['setup_issue_public'] ?? ''),
         ];
     }
@@ -1451,6 +1470,17 @@ final class AccountController extends Controller
         }
 
         return url('/account/domains/' . rawurlencode($domainName) . '/dns');
+    }
+
+    private function cpanelUrl(): string
+    {
+        $configured = trim((string) ($this->settings['cpanel_login_url'] ?? env('CPANEL_LOGIN_URL', '')));
+        if ($configured !== '') {
+            return $configured;
+        }
+
+        $host = trim((string) ($this->settings['whm_hostname'] ?? env('WHM_HOSTNAME', env('WHM_HOST', ''))));
+        return $host !== '' ? 'https://' . preg_replace('#^https?://#', '', $host) . ':2083' : '';
     }
 
     private function blankNameservers(): array

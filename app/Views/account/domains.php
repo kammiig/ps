@@ -25,6 +25,7 @@
                                     <div><dt>Renewal date</dt><dd><?= e($domain['renewal_date'] ?? 'Not available') ?></dd></div>
                                     <div><dt>Renewal amount</dt><dd><?= e($domain['renewal_amount'] ?? 'Not available') ?></dd></div>
                                     <div><dt>Setup status</dt><dd><?= e($domain['registrar_status'] ?? 'Processing') ?></dd></div>
+                                    <div><dt>Cloudflare DNS</dt><dd><?= e($domain['cloudflare_status'] ?: 'Pending') ?></dd></div>
                                 </dl>
                                 <div class="nameserver-list">
                                     <strong>Nameservers</strong>

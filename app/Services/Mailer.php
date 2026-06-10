@@ -52,4 +52,42 @@ final class Mailer
 
         return mail($to, $subject, $body, implode("\r\n", $headers));
     }
+
+    public static function hostingProvisioned(array $settings, array $user, array $credentials): bool
+    {
+        $to = $user['email'] ?? '';
+        if (!$to) {
+            return false;
+        }
+
+        $firstName = trim((string) ($user['first_name'] ?? 'there')) ?: 'there';
+        $domain = (string) ($credentials['domain'] ?? '');
+        $username = (string) ($credentials['username'] ?? '');
+        $password = (string) ($credentials['password'] ?? '');
+        $serverIp = (string) ($credentials['server_ip'] ?? '');
+        $cpanelUrl = (string) ($credentials['cpanel_url'] ?? '');
+
+        if ($domain === '' || $username === '' || $password === '') {
+            return false;
+        }
+
+        $subject = 'Your Planetic Solutions hosting is ready';
+        $body = "Hello {$firstName},\n\n"
+            . "Your hosting account for {$domain} has been created.\n\n"
+            . "cPanel URL: " . ($cpanelUrl !== '' ? $cpanelUrl : 'Available from your Planetic account') . "\n"
+            . "Server IP: " . ($serverIp !== '' ? $serverIp : 'Available from your Planetic account') . "\n"
+            . "cPanel username: {$username}\n"
+            . "Initial cPanel password: {$password}\n\n"
+            . "For your security, keep this password private and change it after your first login. "
+            . "DNS and Cloudflare setup can take time to propagate after nameservers are updated.\n\n"
+            . "You can view your hosting status from your Planetic Solutions account dashboard.\n";
+
+        $from = $settings['mail_from'] ?? env('MAIL_FROM', $settings['admin_email'] ?? $to);
+        $headers = [
+            'From: Planetic Solutions <' . $from . '>',
+            'Content-Type: text/plain; charset=UTF-8',
+        ];
+
+        return mail($to, $subject, $body, implode("\r\n", $headers));
+    }
 }

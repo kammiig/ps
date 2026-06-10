@@ -13,6 +13,7 @@ use App\Models\PaymentRepository;
 use App\Models\ProvisioningRepository;
 use App\Services\StripeService;
 use App\Services\WhmcsService;
+use App\Services\ProvisioningAutomationService;
 
 final class PaymentController extends Controller
 {
@@ -22,6 +23,7 @@ final class PaymentController extends Controller
     private StripeService $stripe;
     private PaymentRepository $payments;
     private ProvisioningRepository $provisioning;
+    private ProvisioningAutomationService $automation;
     private CustomerAuth $auth;
 
     public function __construct()
@@ -32,6 +34,7 @@ final class PaymentController extends Controller
         $this->stripe = new StripeService();
         $this->payments = new PaymentRepository();
         $this->provisioning = new ProvisioningRepository();
+        $this->automation = new ProvisioningAutomationService($this->whmcs, $this->provisioning, $this->settings);
         $this->auth = new CustomerAuth();
     }
 
@@ -440,6 +443,11 @@ final class PaymentController extends Controller
         }
 
         $this->payments->markPaid((int) $order['id'], (string) $intent['id']);
+        $this->provisioning->logStep((int) $order['id'], null, 'payment', 'payment_confirmed', 'completed', 'Stripe payment was verified and recorded in WHMCS.', [
+            'source' => $source,
+            'payment_intent_id' => (string) ($intent['id'] ?? ''),
+            'whmcs_invoice_id' => (int) ($order['whmcs_invoice_id'] ?? 0),
+        ]);
         $paidOrder = $this->payments->find((int) $order['id']) ?? $order;
         $this->acceptWhmcsOrderAfterPayment($paidOrder, $intent, $source);
         $this->clearAccountWhmcsCache((int) ($order['whmcs_client_id'] ?? 0));
@@ -479,8 +487,20 @@ final class PaymentController extends Controller
             return;
         }
 
+        $this->provisioning->logStep((int) $order['id'], null, 'whmcs', 'whmcs_order_accepted', 'completed', 'WHMCS order was accepted after confirmed payment.', [
+            'source' => $source,
+            'whmcs_order_id' => $whmcsOrderId,
+            'invoice_id' => (int) ($order['whmcs_invoice_id'] ?? 0),
+            'already_processed' => !empty($accepted['already_processed']),
+        ]);
+
         if ($this->orderIncludesDomain($order)) {
             $this->markProvisioningProcessing($order, 'domain', 'Processing');
+            $this->provisioning->logStep((int) $order['id'], null, 'domain', 'domain_registration_requested', 'processing', 'Domain registration was requested through WHMCS order acceptance.', [
+                'source' => $source,
+                'domain' => (string) ($order['selected_domain'] ?? ''),
+                'whmcs_order_id' => $whmcsOrderId,
+            ]);
             $this->syncWhmcsDomainAfterPayment($order, $intent, $source);
         }
 
@@ -520,12 +540,13 @@ final class PaymentController extends Controller
         foreach (($services['products'] ?? []) as $service) {
             $matchedHosting = true;
             $this->markHostingFromWhmcs($order, $service, $whmPackage);
+            $serviceId = $this->serviceIdFromProduct($service);
 
             if (!$this->serviceNeedsProvisioning($service)) {
+                $this->automation->ensureHostingProvisioned($order, $service, $whmPackage, $source, false);
                 continue;
             }
 
-            $serviceId = $this->serviceIdFromProduct($service);
             if ($serviceId <= 0) {
                 continue;
             }
@@ -537,6 +558,21 @@ final class PaymentController extends Controller
             $this->noteProvisioningAttempt((int) $order['id'], 'hosting');
             $created = $this->whmcs->moduleCreate($serviceId);
             if (!$created['ok']) {
+                $fallback = $this->automation->ensureHostingProvisioned($order, $service, $whmPackage, $source, true);
+                if (!empty($fallback['ok'])) {
+                    $this->logPaymentIssue('WHM direct hosting provisioning fallback completed after WHMCS ModuleCreate failed.', [
+                        'source' => $source,
+                        'order_id' => (int) $order['id'],
+                        'payment_intent_id' => (string) ($intent['id'] ?? ''),
+                        'whmcs_order_id' => $whmcsOrderId,
+                        'invoice_id' => (int) $order['whmcs_invoice_id'],
+                        'service_id' => $serviceId,
+                        'domain' => (string) ($service['domain'] ?? ''),
+                        'module_create_message' => $created['message'] ?? '',
+                    ]);
+                    continue;
+                }
+
                 $this->logPaymentIssue('WHMCS hosting service could not be provisioned automatically after payment.', [
                     'source' => $source,
                     'order_id' => (int) $order['id'],
@@ -546,13 +582,14 @@ final class PaymentController extends Controller
                     'service_id' => $serviceId,
                     'service_status' => (string) ($service['status'] ?? ''),
                     'domain' => (string) ($service['domain'] ?? ''),
-                    'message' => $created['message'] ?? 'Unable to create hosting account.',
+                    'message' => $fallback['message'] ?? $created['message'] ?? 'Unable to create hosting account.',
                 ]);
-                $this->markProvisioningIssue($order, 'hosting', 'Your hosting setup is in progress and our team will complete it shortly.', (string) ($created['message'] ?? 'Unable to create hosting account.'));
+                $this->markProvisioningIssue($order, 'hosting', 'Your hosting setup is in progress and our team will complete it shortly.', (string) ($fallback['message'] ?? $created['message'] ?? 'Unable to create hosting account.'));
                 continue;
             }
 
             $this->markHostingProvisioned($order, $serviceId, $whmPackage);
+            $this->automation->ensureHostingProvisioned($order, array_merge($service, ['status' => 'Active']), $whmPackage, $source, false);
             $this->logPaymentIssue('WHMCS hosting service provisioning was requested after payment.', [
                 'source' => $source,
                 'order_id' => (int) $order['id'],
@@ -660,6 +697,13 @@ final class PaymentController extends Controller
 
             try {
                 $this->provisioning->markDomainFromWhmcs($order, $domain, $nameservers);
+                $this->provisioning->logStep((int) $order['id'], null, 'domain', 'domain_registration_synced', 'completed', 'Domain registration status was synced from WHMCS.', [
+                    'source' => $source,
+                    'domain' => $domainName,
+                    'whmcs_domain_id' => $domainId,
+                    'status' => (string) ($domain['status'] ?? ''),
+                    'nameservers' => $nameservers,
+                ]);
             } catch (\Throwable $exception) {
                 $this->logPaymentIssue('Local domain provisioning status could not be saved.', [
                     'source' => $source,
@@ -802,7 +846,11 @@ final class PaymentController extends Controller
     private function orderIncludesHosting(array $order): bool
     {
         $type = strtolower(trim((string) ($order['order_type'] ?? '')));
-        return in_array($type, ['hosting', 'bundle'], true);
+        if (in_array($type, ['hosting', 'bundle'], true)) {
+            return true;
+        }
+
+        return $type === 'website' && !empty($this->whmcs->checkoutConfig()['website_package']['includes_hosting']);
     }
 
     private function whmPackageForOrder(array $order): string
@@ -816,6 +864,13 @@ final class PaymentController extends Controller
         $config = $this->whmcs->checkoutConfig()['hosting_products'] ?? [];
         if ($slug !== '' && isset($config[$slug]['whm_package'])) {
             return (string) $config[$slug]['whm_package'];
+        }
+
+        if (strtolower(trim((string) ($order['order_type'] ?? ''))) === 'website') {
+            $website = $this->whmcs->checkoutConfig()['website_package'] ?? [];
+            if (!empty($website['includes_hosting'])) {
+                return trim((string) ($website['whm_package'] ?? env('WHMCS_WEBSITE_WHM_PACKAGE', 'planetic_agency')));
+            }
         }
 
         $haystack = strtolower($slug . ' ' . (string) ($order['package_label'] ?? ''));

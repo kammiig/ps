@@ -32,12 +32,27 @@ final class ContentRepository
         $settings['company_name'] ??= env('APP_NAME', 'Planetic Solutions');
         $settings['app_url'] ??= env('APP_URL', '');
         $settings['whmcs_client_area_url'] ??= env('WHMCS_URL', env('WHMCS_CLIENT_AREA_URL', 'https://planeticsolution.com/clientarea/'));
+        $settings['whmcs_api_url'] ??= env('WHMCS_API_URL', '');
+        $settings['whmcs_api_identifier'] ??= env('WHMCS_API_IDENTIFIER', '');
+        $settings['whmcs_api_secret'] ??= env('WHMCS_API_SECRET', '');
         $settings['domain_hosting_pid'] ??= env('DOMAIN_HOSTING_PID', '');
         $settings['whmcs_payment_method'] ??= env('WHMCS_PAYMENT_METHOD', 'stripe');
         $settings['whmcs_payment_gateway_name'] ??= env('WHMCS_PAYMENT_GATEWAY_NAME', '');
         $settings['whmcs_domain_registrar'] ??= env('WHMCS_DOMAIN_REGISTRAR', '');
         $settings['website_development_product_ids'] ??= env('WEBSITE_DEVELOPMENT_PRODUCT_IDS', env('WHMCS_WEBSITE_PACKAGE_PID', ''));
+        $settings['whm_hostname'] ??= env('WHM_HOSTNAME', env('WHM_HOST', ''));
+        $settings['whm_username'] ??= env('WHM_USERNAME', env('WHM_RESELLER_USERNAME', ''));
+        $settings['whm_api_token'] ??= env('WHM_API_TOKEN', '');
+        $settings['default_hosting_server_ip'] ??= env('DEFAULT_HOSTING_SERVER_IP', env('WHM_SERVER_IP', env('HOSTING_SERVER_IP', '')));
+        $settings['cpanel_login_url'] ??= env('CPANEL_LOGIN_URL', '');
+        $settings['cloudflare_account_id'] ??= env('CLOUDFLARE_ACCOUNT_ID', '');
         $settings['cloudflare_zone_map'] ??= env('CLOUDFLARE_ZONE_MAP', '');
+        $settings['cloudflare_api_token'] ??= env('CLOUDFLARE_API_TOKEN', '');
+        $settings['cloudflare_ssl_mode'] ??= env('CLOUDFLARE_SSL_MODE', 'full');
+        $settings['default_mx_records'] ??= env('DEFAULT_MX_RECORDS', env('MAIL_MX_RECORDS', ''));
+        $settings['default_spf_record'] ??= env('DEFAULT_SPF_RECORD', env('MAIL_SPF_RECORD', ''));
+        $settings['default_dkim_records'] ??= env('DEFAULT_DKIM_RECORDS', env('MAIL_DKIM_RECORDS', ''));
+        $settings['recaptcha_secret_key'] ??= env('RECAPTCHA_SECRET_KEY', '');
         $settings['admin_email'] ??= env('ADMIN_EMAIL', '');
         $settings['mail_from'] ??= env('MAIL_FROM', '');
 

@@ -65,6 +65,8 @@ return [
         'product_ids' => env('WEBSITE_DEVELOPMENT_PRODUCT_IDS', env('WHMCS_WEBSITE_PACKAGE_PID', 5)),
         'billing_cycle' => env('WHMCS_WEBSITE_BILLING_CYCLE', 'onetime'),
         'register_domain' => filter_var(env('WHMCS_WEBSITE_REGISTER_DOMAIN', true), FILTER_VALIDATE_BOOLEAN),
+        'includes_hosting' => filter_var(env('WHMCS_WEBSITE_INCLUDES_HOSTING', false), FILTER_VALIDATE_BOOLEAN),
+        'whm_package' => env('WHMCS_WEBSITE_WHM_PACKAGE', 'planetic_agency'),
         'domain_price_override' => env('WHMCS_WEBSITE_DOMAIN_PRICE_OVERRIDE', '0.00'),
         'price_override' => env('WHMCS_WEBSITE_PRICE_OVERRIDE', '199.00'),
     ],

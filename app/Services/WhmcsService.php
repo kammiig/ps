@@ -787,6 +787,36 @@ final class WhmcsService
         return ['ok' => true, 'raw' => $decoded];
     }
 
+    public function updateClientProduct(int $serviceId, array $fields): array
+    {
+        if ($serviceId <= 0) {
+            return ['ok' => false, 'message' => 'A valid hosting service reference is required.'];
+        }
+
+        $allowed = ['username', 'password', 'password2', 'domain', 'dedicatedip', 'assignedips', 'status', 'notes'];
+        $payload = [
+            'action' => 'UpdateClientProduct',
+            'serviceid' => $serviceId,
+            'responsetype' => 'json',
+        ];
+        foreach ($allowed as $field) {
+            if (array_key_exists($field, $fields) && $fields[$field] !== null && $fields[$field] !== '') {
+                $payload[$field] = (string) $fields[$field];
+            }
+        }
+
+        $decoded = $this->callApi($payload);
+        if (($decoded['result'] ?? '') !== 'success') {
+            return [
+                'ok' => false,
+                'message' => $decoded['message'] ?? 'Unable to update WHMCS hosting service.',
+                'raw' => $decoded,
+            ];
+        }
+
+        return ['ok' => true, 'raw' => $decoded];
+    }
+
     public function domainRegister(int $domainId, string $domain = ''): array
     {
         if ($domainId <= 0 && trim($domain) === '') {
