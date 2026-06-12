@@ -38,6 +38,62 @@ final class WhmAccountService
         return $host !== '' ? 'https://' . preg_replace('#^https?://#', '', $host) . ':2083' : '';
     }
 
+    public function testConnection(): array
+    {
+        if (!$this->configured()) {
+            return ['ok' => false, 'message' => 'WHM API credentials are not configured.'];
+        }
+
+        $result = $this->listPackages();
+        if (empty($result['ok'])) {
+            return ['ok' => false, 'message' => (string) ($result['message'] ?? 'WHM API connection failed.')];
+        }
+
+        return ['ok' => true, 'message' => 'WHM API listpkgs succeeded with ' . count($result['packages']) . ' package(s).'];
+    }
+
+    public function listPackages(): array
+    {
+        if (!$this->configured()) {
+            return ['ok' => false, 'message' => 'WHM API credentials are not configured.', 'packages' => []];
+        }
+
+        $result = $this->api('listpkgs');
+        if (empty($result['ok'])) {
+            return ['ok' => false, 'message' => (string) ($result['message'] ?? 'WHM package list could not be loaded.'), 'packages' => []];
+        }
+
+        $packages = $result['data']['pkg'] ?? [];
+        if (is_array($packages) && isset($packages['name'])) {
+            $packages = [$packages];
+        }
+
+        $names = [];
+        foreach (is_array($packages) ? $packages : [] as $row) {
+            $name = trim((string) ($row['name'] ?? ''));
+            if ($name !== '') {
+                $names[] = $name;
+            }
+        }
+
+        return ['ok' => true, 'message' => 'WHM package list loaded.', 'packages' => array_values(array_unique($names))];
+    }
+
+    public function packageExists(string $package): bool
+    {
+        $package = trim($package);
+        if ($package === '' || !$this->configured()) {
+            return false;
+        }
+
+        $result = $this->listPackages();
+        if (empty($result['ok'])) {
+            return false;
+        }
+
+        return in_array($package, $result['packages'] ?? [], true);
+    }
+
     public function createOrFindAccount(string $domain, string $package, string $contactEmail = '', string $preferredUsername = ''): array
     {
         $domain = $this->normaliseDomain($domain);
@@ -101,6 +157,22 @@ final class WhmAccountService
             }
 
             $lastMessage = (string) ($created['message'] ?? $lastMessage);
+            if ($this->messageLooksLikeExistingAccount($lastMessage)) {
+                $existing = $this->accountSummary($domain);
+                if (!empty($existing['ok']) && !empty($existing['found'])) {
+                    return [
+                        'ok' => true,
+                        'existing' => true,
+                        'domain' => $domain,
+                        'username' => (string) ($existing['username'] ?? ''),
+                        'server_ip' => (string) ($existing['server_ip'] ?? $this->serverIp()),
+                        'package' => (string) ($existing['package'] ?? $package),
+                        'cpanel_url' => $this->cpanelUrl($domain),
+                        'password' => '',
+                        'encrypted_password' => '',
+                    ];
+                }
+            }
             if (!str_contains(strtolower($lastMessage), 'user') && !str_contains(strtolower($lastMessage), 'username')) {
                 break;
             }
@@ -123,7 +195,12 @@ final class WhmAccountService
         if (empty($summary['ok'])) {
             $message = strtolower((string) ($summary['message'] ?? ''));
             if (str_contains($message, 'not found') || str_contains($message, 'no account')) {
-                return ['ok' => true, 'found' => false];
+                return $this->accountSummaryFromList($domain);
+            }
+
+            $fallback = $this->accountSummaryFromList($domain);
+            if (!empty($fallback['ok']) && !empty($fallback['found'])) {
+                return $fallback;
             }
 
             return ['ok' => false, 'found' => false, 'message' => $summary['message'] ?? 'Unable to load WHM account summary.'];
@@ -148,6 +225,53 @@ final class WhmAccountService
             'package' => (string) ($account['plan'] ?? $account['package'] ?? ''),
             'raw' => $account,
         ];
+    }
+
+    private function accountSummaryFromList(string $domain): array
+    {
+        $result = $this->api('listaccts', [
+            'searchtype' => 'domain',
+            'search' => $domain,
+        ]);
+        if (empty($result['ok'])) {
+            return ['ok' => true, 'found' => false];
+        }
+
+        $accounts = $result['data']['acct'] ?? [];
+        if (is_array($accounts) && isset($accounts['user'])) {
+            $accounts = [$accounts];
+        }
+
+        foreach (is_array($accounts) ? $accounts : [] as $account) {
+            $account = (array) $account;
+            if (strtolower((string) ($account['domain'] ?? '')) !== $domain) {
+                continue;
+            }
+
+            return [
+                'ok' => true,
+                'found' => true,
+                'username' => (string) ($account['user'] ?? $account['username'] ?? ''),
+                'domain' => (string) ($account['domain'] ?? $domain),
+                'server_ip' => (string) ($account['ip'] ?? $account['ipv4'] ?? $this->serverIp()),
+                'package' => (string) ($account['plan'] ?? $account['package'] ?? ''),
+                'raw' => $account,
+            ];
+        }
+
+        return ['ok' => true, 'found' => false];
+    }
+
+    private function messageLooksLikeExistingAccount(string $message): bool
+    {
+        $message = strtolower($message);
+        foreach (['already exists', 'dns entry', 'owned by another user', 'domain exists', 'user exists'] as $needle) {
+            if (str_contains($message, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function api(string $function, array $params = [], string $method = 'GET'): array

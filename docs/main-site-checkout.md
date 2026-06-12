@@ -59,6 +59,7 @@ POST /admin/provisioning/{id}/retry
 - `GetInvoice` loads the exact invoice amount before creating a Stripe PaymentIntent.
 - `GetInvoices` loads customer invoices for `/account/billing`.
 - `GetClientsProducts` and `GetClientsDomains` load services/domains for the customer account.
+- `PlaneticGetOrderServices` is used by the optional WHMCS local bridge to load the exact hosting service rows for a paid order when standard WHMCS product reads do not include reliable order IDs.
 - `UpdateClient` syncs customer profile edits.
 - `AddInvoicePayment` records verified Stripe payments against the existing WHMCS invoice.
 - `AcceptOrder` runs only after verified payment, with automatic setup enabled and registrar submission requested.
@@ -165,6 +166,39 @@ For hosting orders, the post-payment flow is:
 9. Create or find the Cloudflare zone, upsert default A/CNAME/MX/TXT records, apply HTTPS settings and update registrar nameservers through WHMCS when the domain is available.
 10. Write audit entries to `provisioning_logs`, visible in Admin > Provisioning.
 
+The local status is intentionally stricter than WHMCS status. A WHMCS service marked `Active` is not treated as locally active unless the service has a cPanel username or the WHM API can verify/find/create the account. Cloudflare is not marked active unless the zone and DNS record writes succeed.
+
+## Provisioning CLI
+
+Run diagnostics after deployment or when a hosting card is stuck on Setup in Progress/Action Required:
+
+```bash
+php artisan planetic:provision-diagnose
+```
+
+The diagnostic checks app bootstrap, required config presence without printing secrets, WHMCS connectivity, WHM `listpkgs`, Cloudflare token verification, Cloudflare account ID validity, Stripe webhook route registration, queue/cache status, package mapping, pending hosting services and the last provisioning failures.
+
+Retry a local order or service without replaying Stripe:
+
+```bash
+php artisan planetic:provision-order 123
+php artisan planetic:provision-service 456
+```
+
+`planetic:provision-service` accepts either the local `customer_provisioning_items.id` or the WHMCS service ID when that ID has already been stored locally.
+
+This repository is a custom PHP app, not Laravel. These compatibility commands are intentionally safe no-ops:
+
+```bash
+php artisan config:clear
+php artisan cache:clear
+php artisan route:clear
+php artisan view:clear
+php artisan queue:restart
+```
+
+There is no Laravel queue worker to run. Provisioning runs from the verified Stripe webhook, Admin > Provisioning retry, or the CLI retry commands.
+
 On `payment_intent.payment_failed`, the local order is marked failed and the existing WHMCS invoice remains unpaid. Retry uses the same local invoice mapping.
 
 ## Setup Steps
@@ -184,13 +218,42 @@ On `payment_intent.payment_failed`, the local order is marked failed and the exi
 13. Confirm WHMCS domain registrar modules and TLD auto-registration settings are configured.
 14. Confirm the WHM API token belongs to a reseller/root user allowed to create accounts with those packages.
 15. Confirm the Cloudflare API token can create zones and edit DNS under `CLOUDFLARE_ACCOUNT_ID`.
-16. Test the flow with Stripe test mode and low-value WHMCS products first.
+16. Run `php artisan planetic:provision-diagnose` and resolve any failed connectivity/config/package checks.
+17. Test the flow with Stripe test mode and low-value WHMCS products first.
 
 If domain search or checkout says WHMCS is not responding, check `storage/logs/whmcs-api.log`. The website calls WHMCS server-side using cURL first, then a PHP stream fallback. Most failures are caused by missing API credentials, WHMCS API IP restrictions, an incorrect `WHMCS_API_URL`, or cPanel outbound HTTPS/SSL issues.
 
+## Production Deployment Commands
+
+```bash
+cd /home/CPANEL_USER/public_html
+git pull origin main
+mysql -u DB_USER -p DB_NAME < database/provisioning_automation_update.sql
+cp whmcs-bridge/planetic-local-api.php /home/CPANEL_USER/public_html/clientarea/planetic-local-api.php
+php artisan config:clear
+php artisan cache:clear
+php artisan route:clear
+php artisan view:clear
+php artisan queue:restart
+php artisan planetic:provision-diagnose
+```
+
+If the WHMCS bridge token inside `clientarea/planetic-local-api.php` was customized directly on production, preserve that token when copying the bridge file.
+
+## WHMCS Admin Checklist
+
+- Each paid hosting product uses the cPanel module.
+- Each cPanel product is assigned to the correct WHM server/server group.
+- Auto setup is enabled after first payment.
+- The module package name exactly matches `planetic_starter`, `planetic_business`, `planetic_pro` or `planetic_agency`.
+- WHMCS can run `ModuleCreate` for the service manually from the product/service admin page.
+- The WHM API token used by WHMCS/direct fallback can create accounts and list packages.
+- Stripe webhook endpoint is `https://planeticsolution.com/stripe/webhook` with `payment_intent.succeeded` and `payment_intent.payment_failed`.
+- Cloudflare token has Zone Edit and DNS Edit permissions on the account in `CLOUDFLARE_ACCOUNT_ID`.
+
 If the log says `Invalid IP 185.61.154.29`, WHMCS is blocking the main website server. Add `185.61.154.29` to the allowed API IP list in WHMCS or configure a WHMCS API access key and set it as `WHMCS_API_ACCESS_KEY` in `.env`.
 
-If the access key is configured but WHMCS still returns `Invalid IP`, use the local bridge:
+If the access key is configured but WHMCS still returns `Invalid IP`, use the local bridge. Upload the latest bridge whenever provisioning code changes; it includes the `PlaneticGetOrderServices` helper used to match WHMCS hosting services to paid orders:
 
 ```text
 whmcs-bridge/planetic-local-api.php

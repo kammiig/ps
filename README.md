@@ -113,7 +113,7 @@ If WHMCS has API IP access restrictions enabled with an access key, set `WHMCS_A
 
 If the log shows `Invalid IP 185.61.154.29`, allow `185.61.154.29` in WHMCS API IP access settings or set the matching API access key in `.env`.
 
-If WHMCS continues rejecting external API calls with `Invalid IP`, use the included local bridge instead:
+If WHMCS continues rejecting external API calls with `Invalid IP`, use the included local bridge instead. Upload the latest bridge whenever provisioning code changes; it includes the `PlaneticGetOrderServices` helper used to match WHMCS hosting services to paid orders:
 
 1. Upload `whmcs-bridge/planetic-local-api.php` into `public_html/clientarea/planetic-local-api.php`.
 2. Edit the uploaded file and replace `change_this_long_random_token` with a long random token.
@@ -169,6 +169,31 @@ Hosting and website package product IDs can be updated in:
 - Admin > Hosting Plans, where existing WHMCS product URLs are still used as a PID fallback
 
 The local WHM package labels are mapped as Starter `planetic_starter`, Business `planetic_business`, Pro `planetic_pro`, and Agency/Ecommerce `planetic_agency`. Confirm the same package names inside each WHMCS product/module setting; direct WHM fallback also uses this mapping.
+
+Provisioning diagnostics and retries are available from the project root:
+
+```bash
+php artisan planetic:provision-diagnose
+php artisan planetic:provision-order 123
+php artisan planetic:provision-service 456
+```
+
+This is a custom PHP app, not Laravel. The included `php artisan config:clear`, `cache:clear`, `route:clear`, `view:clear` and `queue:restart` commands are compatibility no-ops so cPanel deployment checklists can be run safely. There is no Laravel queue worker or cron required for provisioning; Stripe calls `/stripe/webhook` directly.
+
+Production deployment/update commands:
+
+```bash
+cd /home/CPANEL_USER/public_html
+git pull origin main
+mysql -u DB_USER -p DB_NAME < database/provisioning_automation_update.sql
+cp whmcs-bridge/planetic-local-api.php /home/CPANEL_USER/public_html/clientarea/planetic-local-api.php
+php artisan config:clear
+php artisan cache:clear
+php artisan route:clear
+php artisan view:clear
+php artisan queue:restart
+php artisan planetic:provision-diagnose
+```
 
 Full setup notes are in `docs/main-site-checkout.md`.
 

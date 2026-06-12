@@ -229,13 +229,15 @@ final class PaymentController extends Controller
         $order = $this->paymentOrderForIntent($intent);
         $inserted = $this->payments->insertWebhookEvent($eventId, $type, $paymentIntentId, $order ? (int) $order['id'] : null);
         if (!$inserted) {
+            if ($type === 'payment_intent.succeeded') {
+                return $this->handleSucceededWebhook($eventId, $intent, $order);
+            }
+
             $existingEvent = $this->payments->webhookEvent($eventId);
             if (($existingEvent['processing_status'] ?? '') !== 'failed') {
                 return json_encode(['received' => true, 'duplicate' => true]);
             }
-            if ($type === 'payment_intent.succeeded') {
-                return $this->handleSucceededWebhook($eventId, $intent, $order);
-            }
+
             return json_encode(['received' => true, 'duplicate' => true]);
         }
 
@@ -468,8 +470,19 @@ final class PaymentController extends Controller
             return;
         }
 
+        $this->provisioning->logStep((int) $order['id'], null, 'whmcs', 'whmcs_order_accept_started', 'processing', 'Accepting WHMCS order after confirmed payment.', [
+            'source' => $source,
+            'whmcs_order_id' => $whmcsOrderId,
+            'invoice_id' => (int) ($order['whmcs_invoice_id'] ?? 0),
+        ]);
+
         $accepted = $this->whmcs->acceptOrder($whmcsOrderId);
         if (!$accepted['ok']) {
+            $this->provisioning->logStep((int) $order['id'], null, 'whmcs', 'whmcs_order_accept_failed', 'failed', (string) ($accepted['message'] ?? 'Unable to accept WHMCS order.'), [
+                'source' => $source,
+                'whmcs_order_id' => $whmcsOrderId,
+                'invoice_id' => (int) ($order['whmcs_invoice_id'] ?? 0),
+            ]);
             $this->logPaymentIssue('WHMCS order could not be accepted automatically after payment.', [
                 'source' => $source,
                 'order_id' => (int) $order['id'],
@@ -556,7 +569,19 @@ final class PaymentController extends Controller
             }
 
             $this->noteProvisioningAttempt((int) $order['id'], 'hosting');
+            $this->provisioning->logStep((int) $order['id'], null, 'whmcs', 'whmcs_module_create_started', 'processing', 'Starting WHMCS ModuleCreate for hosting service.', [
+                'source' => $source,
+                'service_id' => $serviceId,
+                'domain' => (string) ($service['domain'] ?? ''),
+                'whm_package' => $whmPackage,
+            ]);
             $created = $this->whmcs->moduleCreate($serviceId);
+            $this->provisioning->logStep((int) $order['id'], null, 'whmcs', !empty($created['ok']) ? 'whmcs_module_create_completed' : 'whmcs_module_create_failed', !empty($created['ok']) ? 'completed' : 'failed', (string) ($created['message'] ?? (!empty($created['ok']) ? 'WHMCS ModuleCreate completed.' : 'WHMCS ModuleCreate failed.')), [
+                'source' => $source,
+                'service_id' => $serviceId,
+                'domain' => (string) ($service['domain'] ?? ''),
+                'whm_package' => $whmPackage,
+            ]);
             if (!$created['ok']) {
                 $fallback = $this->automation->ensureHostingProvisioned($order, $service, $whmPackage, $source, true);
                 if (!empty($fallback['ok'])) {
@@ -588,8 +613,12 @@ final class PaymentController extends Controller
                 continue;
             }
 
-            $this->markHostingProvisioned($order, $serviceId, $whmPackage);
-            $this->automation->ensureHostingProvisioned($order, array_merge($service, ['status' => 'Active']), $whmPackage, $source, false);
+            $serviceAfterCreate = $this->freshServiceAfterModuleCreate($whmcsOrderId, $whmcsClientId, $serviceId) ?? $service;
+            $provisioned = $this->automation->ensureHostingProvisioned($order, $serviceAfterCreate, $whmPackage, $source, true);
+            if (empty($provisioned['ok'])) {
+                $this->markProvisioningIssue($order, 'hosting', 'Your hosting setup is in progress and our team will complete it shortly.', (string) ($provisioned['message'] ?? 'Unable to verify the created cPanel account.'));
+                continue;
+            }
             $this->logPaymentIssue('WHMCS hosting service provisioning was requested after payment.', [
                 'source' => $source,
                 'order_id' => (int) $order['id'],
@@ -602,6 +631,24 @@ final class PaymentController extends Controller
         }
 
         if (!$matchedHosting && $this->orderIncludesHosting($order)) {
+            $fallback = $this->automation->ensureHostingProvisioned($order, [
+                'id' => 0,
+                'serviceid' => 0,
+                'domain' => (string) ($order['selected_domain'] ?? ''),
+                'status' => 'Pending',
+            ], $whmPackage, $source . ':no_whmcs_service', true);
+            if (!empty($fallback['ok'])) {
+                $this->logPaymentIssue('WHM direct hosting provisioning completed because no WHMCS service was returned for the paid order.', [
+                    'source' => $source,
+                    'order_id' => (int) $order['id'],
+                    'payment_intent_id' => (string) ($intent['id'] ?? ''),
+                    'whmcs_order_id' => $whmcsOrderId,
+                    'invoice_id' => (int) $order['whmcs_invoice_id'],
+                    'domain' => (string) ($order['selected_domain'] ?? ''),
+                ]);
+                return;
+            }
+
             $this->markProvisioningIssue($order, 'hosting', 'Your hosting setup is being reviewed by our team.', 'No WHMCS hosting service was returned for the paid order.');
             $this->logPaymentIssue('No WHMCS hosting services matched the paid order.', [
                 'source' => $source,
@@ -611,6 +658,27 @@ final class PaymentController extends Controller
                 'invoice_id' => (int) $order['whmcs_invoice_id'],
             ]);
         }
+    }
+
+    private function freshServiceAfterModuleCreate(int $orderId, int $clientId, int $serviceId): ?array
+    {
+        if ($orderId <= 0 || $clientId <= 0 || $serviceId <= 0) {
+            return null;
+        }
+
+        usleep(500000);
+        $services = $this->whmcs->servicesForOrder($orderId, $clientId);
+        if (empty($services['ok'])) {
+            return null;
+        }
+
+        foreach (($services['products'] ?? []) as $service) {
+            if ($this->serviceIdFromProduct($service) === $serviceId) {
+                return $service;
+            }
+        }
+
+        return null;
     }
 
     private function serviceIdFromProduct(array $service): int
@@ -633,7 +701,7 @@ final class PaymentController extends Controller
         }
 
         if ($status === 'active') {
-            return false;
+            return trim((string) ($service['username'] ?? '')) === '';
         }
 
         return trim((string) ($service['username'] ?? '')) === '';

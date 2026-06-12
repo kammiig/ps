@@ -149,10 +149,16 @@ final class PaymentRepository
         $stmt = $this->db->prepare(
             'UPDATE customer_orders
              SET payment_status = "processing", updated_at = NOW()
-             WHERE id = :id AND payment_status IN ("pending", "failed")'
+             WHERE id = :id AND payment_status IN ("pending", "failed", "processing")'
         );
         $stmt->execute(['id' => $id]);
-        return $stmt->rowCount() > 0;
+        if ($stmt->rowCount() > 0) {
+            return true;
+        }
+
+        $check = $this->db->prepare('SELECT payment_status FROM customer_orders WHERE id = :id LIMIT 1');
+        $check->execute(['id' => $id]);
+        return (string) $check->fetchColumn() === 'processing';
     }
 
     public function markPaid(int $id, string $reference): void

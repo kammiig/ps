@@ -11,7 +11,7 @@ declare(strict_types=1);
  * WHMCS_LOCAL_API_BRIDGE_TOKEN=change_this_long_random_token
  */
 
-define('PLANETIC_BRIDGE_VERSION', '2026-06-10-hosting-dns-provisioning-v9');
+define('PLANETIC_BRIDGE_VERSION', '2026-06-12-hosting-dns-provisioning-v10');
 
 $bridgeToken = 'change_this_long_random_token';
 $adminUsername = '';
@@ -53,6 +53,7 @@ $allowedActions = [
     'GetOrders',
     'PlaneticGetInvoice',
     'PlaneticGetOrderInvoice',
+    'PlaneticGetOrderServices',
     'GetClientsProducts',
     'GetClientsDomains',
     'UpdateClient',
@@ -246,6 +247,39 @@ function planeticBridgeFirstMatchingInvoiceId(int $clientId, array $invoiceIds, 
     return $expectedAmount > 0 ? 0 : $firstExisting;
 }
 
+function planeticBridgeHostingPayload($row): array
+{
+    $row = (array) $row;
+    $serviceId = (int) ($row['id'] ?? 0);
+
+    return [
+        'id' => $serviceId,
+        'serviceid' => $serviceId,
+        'hostingid' => $serviceId,
+        'relid' => $serviceId,
+        'orderid' => (int) ($row['orderid'] ?? 0),
+        'clientid' => (int) ($row['userid'] ?? 0),
+        'userid' => (int) ($row['userid'] ?? 0),
+        'pid' => (int) ($row['packageid'] ?? 0),
+        'productid' => (int) ($row['packageid'] ?? 0),
+        'productname' => (string) ($row['productname'] ?? ''),
+        'name' => (string) ($row['productname'] ?? ''),
+        'type' => (string) ($row['producttype'] ?? ''),
+        'domain' => (string) ($row['domain'] ?? ''),
+        'username' => (string) ($row['username'] ?? ''),
+        'dedicatedip' => (string) ($row['dedicatedip'] ?? ''),
+        'serverip' => (string) ($row['server_ip'] ?? ''),
+        'status' => (string) ($row['domainstatus'] ?? ''),
+        'billingcycle' => (string) ($row['billingcycle'] ?? ''),
+        'recurringamount' => (string) ($row['amount'] ?? ''),
+        'amount' => (string) ($row['amount'] ?? ''),
+        'regdate' => (string) ($row['regdate'] ?? ''),
+        'registrationdate' => (string) ($row['regdate'] ?? ''),
+        'nextduedate' => (string) ($row['nextduedate'] ?? ''),
+        'paymentmethod' => (string) ($row['paymentmethod'] ?? ''),
+    ];
+}
+
 function planeticBridgeResolveOrderInvoiceId(array $order, int $orderId, int $clientId, float $expectedAmount = 0.0): int
 {
     $candidateIds = [];
@@ -397,6 +431,51 @@ if ($action === 'PlaneticGetOrderInvoice') {
     } catch (Throwable) {
         http_response_code(500);
         echo json_encode(['result' => 'error', 'message' => 'Bridge order invoice lookup failed.']);
+        exit;
+    }
+}
+
+if ($action === 'PlaneticGetOrderServices') {
+    $orderId = (int) ($params['orderid'] ?? 0);
+    $clientId = (int) ($params['clientid'] ?? $params['userid'] ?? 0);
+
+    if ($orderId <= 0 || $clientId <= 0) {
+        http_response_code(422);
+        echo json_encode(['result' => 'error', 'message' => 'Order ID and client ID are required.']);
+        exit;
+    }
+
+    try {
+        if (!class_exists('\WHMCS\Database\Capsule')) {
+            throw new RuntimeException('WHMCS database layer is unavailable.');
+        }
+
+        $rows = \WHMCS\Database\Capsule::table('tblhosting')
+            ->leftJoin('tblproducts', 'tblproducts.id', '=', 'tblhosting.packageid')
+            ->leftJoin('tblservers', 'tblservers.id', '=', 'tblhosting.server')
+            ->where('tblhosting.orderid', $orderId)
+            ->where('tblhosting.userid', $clientId)
+            ->select([
+                'tblhosting.*',
+                'tblproducts.name as productname',
+                'tblproducts.servertype as producttype',
+                'tblservers.ipaddress as server_ip',
+            ])
+            ->get();
+
+        $products = [];
+        foreach ($rows as $row) {
+            $products[] = planeticBridgeHostingPayload($row);
+        }
+
+        echo json_encode([
+            'result' => 'success',
+            'products' => ['product' => $products],
+        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        exit;
+    } catch (Throwable) {
+        http_response_code(500);
+        echo json_encode(['result' => 'error', 'message' => 'Bridge order service lookup failed.']);
         exit;
     }
 }

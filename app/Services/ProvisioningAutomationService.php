@@ -49,17 +49,30 @@ final class ProvisioningAutomationService
         if ($this->whm->configured()) {
             $summary = $this->whm->accountSummary($domain);
             if (!empty($summary['ok']) && !empty($summary['found'])) {
-                $username = (string) ($summary['username'] ?? $username);
-                $serverIp = (string) ($summary['server_ip'] ?? $serverIp);
-                $this->markHostingReady($order, $serviceId, $whmPackage, $username, $serverIp, '');
-                return $this->finishDns($order, $serviceId, $domain, $serverIp, $source);
+                $summaryUsername = trim((string) ($summary['username'] ?? ''));
+                $summaryServerIp = trim((string) ($summary['server_ip'] ?? ''));
+                $username = $summaryUsername !== '' ? $summaryUsername : $username;
+                $serverIp = $summaryServerIp !== '' ? $summaryServerIp : $serverIp;
+                if ($username !== '') {
+                    $this->markHostingReady($order, $serviceId, $whmPackage, $username, $serverIp, '');
+                    return $this->finishDns($order, $serviceId, $domain, $serverIp, $source);
+                }
+
+                return ['ok' => false, 'message' => 'WHM found the account, but did not return a cPanel username.'];
             }
         }
 
-        if ($status === 'active' || $username !== '') {
+        if ($username !== '') {
             $serverIp = $serverIp !== '' ? $serverIp : $this->whm->serverIp();
             $this->markHostingReady($order, $serviceId, $whmPackage, $username, $serverIp, '');
             return $this->finishDns($order, $serviceId, $domain, $serverIp, $source);
+        }
+
+        if ($status === 'active' && !$this->whm->configured()) {
+            return [
+                'ok' => false,
+                'message' => 'WHMCS reports the service active, but no cPanel username was returned and WHM API credentials are unavailable for verification.',
+            ];
         }
 
         if (!$allowDirectWhmFallback) {
@@ -90,6 +103,17 @@ final class ProvisioningAutomationService
         $username = (string) ($created['username'] ?? '');
         $serverIp = (string) ($created['server_ip'] ?? $this->whm->serverIp());
         $encryptedPassword = (string) ($created['encrypted_password'] ?? '');
+        if ($username === '') {
+            $message = 'WHM created or found the account, but did not return a cPanel username.';
+            $this->provisioning->logStep($orderId, null, 'hosting', 'whm_create_failed', 'failed', $message, [
+                'source' => $source,
+                'domain' => $domain,
+                'service_id' => $serviceId,
+                'whm_package' => $whmPackage,
+            ]);
+
+            return ['ok' => false, 'message' => $message];
+        }
         if ((string) ($created['password'] ?? '') !== '' && $encryptedPassword === '') {
             $this->provisioning->logStep($orderId, null, 'hosting', 'cpanel_password_storage', 'failed', 'cPanel password was generated but could not be encrypted for storage. Set CPANEL_CREDENTIAL_KEY or APP_KEY.', [
                 'source' => $source,
@@ -117,30 +141,81 @@ final class ProvisioningAutomationService
     public function retryHostingProvisioning(array $item, string $source = 'admin_retry'): array
     {
         $order = $this->orderFromItem($item);
+        $orderId = (int) ($order['id'] ?? 0);
+        $domain = $this->normaliseDomain((string) ($item['domain_name'] ?? $order['selected_domain'] ?? ''));
+        $whmPackage = trim((string) ($item['whm_package'] ?? '')) ?: $this->whmPackageForOrder($order);
+        $paid = strtolower((string) ($order['payment_status'] ?? $item['payment_status'] ?? '')) === 'paid'
+            || strtolower((string) ($item['payment_status'] ?? '')) === 'paid';
+
+        if (!$paid) {
+            return ['ok' => false, 'message' => 'Hosting provisioning was not retried because payment is not confirmed locally.'];
+        }
+        if (!$this->invoiceIsPaid($order)) {
+            return ['ok' => false, 'message' => 'Hosting provisioning was not retried because the WHMCS invoice is not marked Paid.'];
+        }
+
+        if ($orderId > 0 && $whmPackage !== '') {
+            $this->provisioning->ensureOrderRecords($order, $whmPackage);
+            $this->provisioning->markPaymentConfirmed($order, (string) ($order['stripe_payment_reference'] ?? ''));
+        }
+
         $serviceId = (int) ($item['whmcs_service_id'] ?? 0);
         $service = [
             'id' => $serviceId,
             'serviceid' => $serviceId,
-            'domain' => (string) ($item['domain_name'] ?? $item['selected_domain'] ?? ''),
+            'domain' => $domain,
             'username' => (string) ($item['cpanel_username'] ?? ''),
+            'dedicatedip' => (string) ($item['server_ip'] ?? ''),
             'status' => (string) ($item['hosting_setup_status'] ?? ''),
         ];
 
+        $this->provisioning->logStep($orderId, (int) ($item['id'] ?? 0), 'hosting', 'hosting_retry_started', 'processing', 'Retrying hosting provisioning.', [
+            'source' => $source,
+            'domain' => $domain,
+            'service_id' => $serviceId,
+            'whm_package' => $whmPackage,
+        ]);
+
+        $this->acceptOrderForRetry($order, (int) ($item['id'] ?? 0), $source);
+
+        $freshService = $this->freshServiceForRetry($order, $serviceId, $domain, (int) ($item['id'] ?? 0), $source);
+        if ($freshService !== null) {
+            $service = array_merge($service, $freshService);
+            if (trim((string) ($service['domain'] ?? '')) === '') {
+                $service['domain'] = $domain;
+            }
+            $serviceId = $this->serviceId($service);
+        }
+
+        $verified = $this->ensureHostingProvisioned($order, $service, $whmPackage, $source, false);
+        if (!empty($verified['ok']) && empty($verified['pending'])) {
+            return $verified;
+        }
+
         if ($serviceId > 0) {
-            $module = $this->whmcs->moduleCreate($serviceId);
-            $this->provisioning->logStep((int) ($order['id'] ?? 0), (int) ($item['id'] ?? 0), 'hosting', 'whmcs_module_create_retry', !empty($module['ok']) ? 'completed' : 'failed', (string) ($module['message'] ?? 'WHMCS ModuleCreate retry requested.'), [
+            $this->moduleCreateForRetry($order, (int) ($item['id'] ?? 0), $serviceId, $domain, $whmPackage, $source);
+            $serviceAfterCreate = $this->freshServiceForRetry($order, $serviceId, $domain, (int) ($item['id'] ?? 0), $source);
+            if ($serviceAfterCreate !== null) {
+                $service = array_merge($service, $serviceAfterCreate);
+                if (trim((string) ($service['domain'] ?? '')) === '') {
+                    $service['domain'] = $domain;
+                }
+            }
+        }
+
+        $result = $this->ensureHostingProvisioned($order, $service, $whmPackage, $source, true);
+        if (empty($result['ok'])) {
+            $message = (string) ($result['message'] ?? 'Hosting provisioning retry failed.');
+            $this->provisioning->markItemIssue($order, 'hosting', 'Your hosting setup is in progress and our team will complete it shortly.', $message);
+            $this->provisioning->logStep($orderId, (int) ($item['id'] ?? 0), 'hosting', 'hosting_retry_failed', 'failed', $message, [
                 'source' => $source,
+                'domain' => $domain,
                 'service_id' => $serviceId,
+                'whm_package' => $whmPackage,
             ]);
         }
 
-        return $this->ensureHostingProvisioned(
-            $order,
-            $service,
-            (string) ($item['whm_package'] ?? ''),
-            $source,
-            true
-        );
+        return $result;
     }
 
     private function finishDns(array $order, int $serviceId, string $domain, string $serverIp, string $source): array
@@ -187,10 +262,100 @@ final class ProvisioningAutomationService
             'source' => $source,
             'domain' => $domain,
             'zone_id' => (string) ($dns['zone_id'] ?? ''),
+            'zone_action' => (string) ($dns['zone_action'] ?? ''),
             'nameservers' => $nameservers,
+            'records' => array_map(static fn (array $record): array => [
+                'type' => (string) ($record['record']['type'] ?? ''),
+                'name' => (string) ($record['record']['name'] ?? ''),
+                'action' => (string) ($record['action'] ?? ''),
+            ], is_array($dns['record_results'] ?? null) ? $dns['record_results'] : []),
+        ]);
+
+        $this->provisioning->logStep($orderId, null, 'hosting', 'provisioning_completed', 'completed', 'Hosting and DNS provisioning completed.', [
+            'source' => $source,
+            'domain' => $domain,
+            'service_id' => $serviceId,
+            'server_ip' => $serverIp,
+            'zone_id' => (string) ($dns['zone_id'] ?? ''),
         ]);
 
         return ['ok' => true, 'dns_ok' => true, 'zone_id' => (string) ($dns['zone_id'] ?? ''), 'nameservers' => $nameservers];
+    }
+
+    private function acceptOrderForRetry(array $order, int $itemId, string $source): void
+    {
+        $orderId = (int) ($order['id'] ?? 0);
+        $whmcsOrderId = (int) ($order['whmcs_order_id'] ?? 0);
+        if ($whmcsOrderId <= 0) {
+            return;
+        }
+
+        $this->provisioning->logStep($orderId, $itemId, 'whmcs', 'whmcs_order_accept_started', 'processing', 'Accepting WHMCS order before hosting retry.', [
+            'source' => $source,
+            'whmcs_order_id' => $whmcsOrderId,
+        ]);
+
+        $accepted = $this->whmcs->acceptOrder($whmcsOrderId);
+        $this->provisioning->logStep($orderId, $itemId, 'whmcs', !empty($accepted['ok']) ? 'whmcs_order_accepted' : 'whmcs_order_accept_failed', !empty($accepted['ok']) ? 'completed' : 'failed', (string) ($accepted['message'] ?? (!empty($accepted['ok']) ? 'WHMCS order accepted.' : 'WHMCS order could not be accepted.')), [
+            'source' => $source,
+            'whmcs_order_id' => $whmcsOrderId,
+            'already_processed' => !empty($accepted['already_processed']),
+        ]);
+    }
+
+    private function freshServiceForRetry(array $order, int $serviceId, string $domain, int $itemId, string $source): ?array
+    {
+        $orderId = (int) ($order['id'] ?? 0);
+        $whmcsOrderId = (int) ($order['whmcs_order_id'] ?? 0);
+        $clientId = (int) ($order['whmcs_client_id'] ?? 0);
+        if ($whmcsOrderId <= 0 || $clientId <= 0) {
+            return null;
+        }
+
+        $services = $this->whmcs->servicesForOrder($whmcsOrderId, $clientId);
+        if (empty($services['ok'])) {
+            $this->provisioning->logStep($orderId, $itemId, 'whmcs', 'whmcs_services_lookup_failed', 'failed', (string) ($services['message'] ?? 'WHMCS services could not be loaded.'), [
+                'source' => $source,
+                'whmcs_order_id' => $whmcsOrderId,
+            ]);
+            return null;
+        }
+
+        $fallback = null;
+        foreach (($services['products'] ?? []) as $service) {
+            $candidate = (array) $service;
+            if ($serviceId > 0 && $this->serviceId($candidate) === $serviceId) {
+                return $candidate;
+            }
+
+            $candidateDomain = $this->normaliseDomain((string) ($candidate['domain'] ?? ''));
+            if ($domain !== '' && $candidateDomain === $domain) {
+                $fallback = $candidate;
+            }
+        }
+
+        return $fallback;
+    }
+
+    private function moduleCreateForRetry(array $order, int $itemId, int $serviceId, string $domain, string $whmPackage, string $source): array
+    {
+        $orderId = (int) ($order['id'] ?? 0);
+        $this->provisioning->logStep($orderId, $itemId, 'whmcs', 'whmcs_module_create_started', 'processing', 'Starting WHMCS ModuleCreate for hosting retry.', [
+            'source' => $source,
+            'service_id' => $serviceId,
+            'domain' => $domain,
+            'whm_package' => $whmPackage,
+        ]);
+
+        $module = $this->whmcs->moduleCreate($serviceId);
+        $this->provisioning->logStep($orderId, $itemId, 'whmcs', !empty($module['ok']) ? 'whmcs_module_create_completed' : 'whmcs_module_create_failed', !empty($module['ok']) ? 'completed' : 'failed', (string) ($module['message'] ?? (!empty($module['ok']) ? 'WHMCS ModuleCreate completed.' : 'WHMCS ModuleCreate failed.')), [
+            'source' => $source,
+            'service_id' => $serviceId,
+            'domain' => $domain,
+            'whm_package' => $whmPackage,
+        ]);
+
+        return $module;
     }
 
     private function markHostingReady(array $order, int $serviceId, string $whmPackage, string $username, string $serverIp, string $encryptedPassword): void
@@ -302,6 +467,52 @@ final class ProvisioningAutomationService
         return (new CustomerRepository())->find($customerId) ?: [];
     }
 
+    private function invoiceIsPaid(array $order): bool
+    {
+        $invoiceId = (int) ($order['whmcs_invoice_id'] ?? 0);
+        $clientId = (int) ($order['whmcs_client_id'] ?? 0);
+        if ($invoiceId <= 0 || $clientId <= 0) {
+            return false;
+        }
+
+        $invoice = $this->whmcs->invoiceForClient($invoiceId, $clientId, (int) ($order['whmcs_order_id'] ?? 0));
+        if (empty($invoice['ok']) || !is_array($invoice['invoice'] ?? null)) {
+            return false;
+        }
+
+        return strtolower((string) ($invoice['invoice']['status'] ?? '')) === 'paid';
+    }
+
+    private function whmPackageForOrder(array $order): string
+    {
+        $existing = trim((string) ($order['whm_package'] ?? ''));
+        if ($existing !== '') {
+            return $existing;
+        }
+
+        $slug = trim((string) ($order['hosting_plan_slug'] ?? ''));
+        $config = $this->whmcs->checkoutConfig()['hosting_products'] ?? [];
+        if ($slug !== '' && isset($config[$slug]['whm_package'])) {
+            return (string) $config[$slug]['whm_package'];
+        }
+
+        $haystack = strtolower($slug . ' ' . (string) ($order['package_label'] ?? ''));
+        if (str_contains($haystack, 'starter')) {
+            return 'planetic_starter';
+        }
+        if (str_contains($haystack, 'business')) {
+            return 'planetic_business';
+        }
+        if (str_contains($haystack, 'agency') || str_contains($haystack, 'ecommerce') || str_contains($haystack, 'commerce') || str_contains($haystack, 'reseller')) {
+            return 'planetic_agency';
+        }
+        if (str_contains($haystack, 'pro') || str_contains($haystack, 'wordpress')) {
+            return 'planetic_pro';
+        }
+
+        return '';
+    }
+
     private function orderFromItem(array $item): array
     {
         return [
@@ -316,6 +527,9 @@ final class ProvisioningAutomationService
             'package_label' => (string) ($item['display_name'] ?? $item['order_package_label'] ?? ''),
             'billing_cycle' => (string) ($item['billing_cycle'] ?? $item['order_billing_cycle'] ?? ''),
             'whm_package' => (string) ($item['whm_package'] ?? ''),
+            'payment_status' => (string) ($item['order_payment_status'] ?? $item['payment_status'] ?? ''),
+            'stripe_payment_reference' => (string) ($item['order_stripe_payment_reference'] ?? $item['stripe_reference'] ?? ''),
+            'paid_at' => (string) ($item['order_paid_at'] ?? ''),
         ];
     }
 

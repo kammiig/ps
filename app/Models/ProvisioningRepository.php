@@ -181,11 +181,12 @@ final class ProvisioningRepository
         }
 
         $status = (string) ($item['provisioning_status'] ?? '');
-        if (in_array($status, ['active', 'action_required'], true)) {
+        if ($status === 'active') {
             return false;
         }
 
-        return (int) ($item['provision_attempts'] ?? 0) < 2;
+        $maxAttempts = $status === 'action_required' ? 3 : 2;
+        return (int) ($item['provision_attempts'] ?? 0) < $maxAttempts;
     }
 
     public function markDomainFromWhmcs(array $order, array $domain, array $nameservers = []): void
@@ -244,6 +245,13 @@ final class ProvisioningRepository
 
         [$provisioningStatus, $hostingStatus] = $this->hostingStatuses((string) ($service['status'] ?? ''));
         $serviceId = $this->firstInt($service, ['id', 'serviceid', 'service_id', 'hostingid', 'relid']);
+        $serviceUsername = trim((string) ($service['username'] ?? ''));
+        $serviceIp = trim((string) ($service['dedicatedip'] ?? $service['serverip'] ?? ''));
+        if ($provisioningStatus === 'active' && $serviceUsername === '') {
+            $provisioningStatus = 'processing';
+            $hostingStatus = 'Setup in Progress';
+        }
+
         $stmt = $this->db->prepare(
             'UPDATE customer_provisioning_items
              SET whmcs_service_id = COALESCE(NULLIF(:whmcs_service_id, 0), whmcs_service_id),
@@ -275,6 +283,8 @@ final class ProvisioningRepository
             'next_due_date' => $this->dateOrNull($service['nextduedate'] ?? null),
             'renewal_amount' => $this->amountOrNull($service['recurringamount'] ?? $service['amount'] ?? null),
         ]);
+
+        $this->updateHostingConnectionDetails($orderId, $serviceId ?? 0, $serviceUsername, $serviceIp);
 
         $this->markOrderAggregate($orderId, [
             'provisioning_status' => $provisioningStatus === 'active' ? 'completed' : 'processing',
@@ -378,6 +388,13 @@ final class ProvisioningRepository
         }
 
         [$provisioningStatus, $hostingStatus] = $this->hostingStatuses((string) ($service['status'] ?? ''));
+        $serviceUsername = trim((string) ($service['username'] ?? ''));
+        $serviceIp = trim((string) ($service['dedicatedip'] ?? $service['serverip'] ?? ''));
+        if ($provisioningStatus === 'active' && $serviceUsername === '') {
+            $provisioningStatus = 'processing';
+            $hostingStatus = 'Setup in Progress';
+        }
+
         $itemKey = 'service:' . $serviceId;
         $stmt = $this->db->prepare(
             'INSERT INTO customer_provisioning_items
@@ -429,6 +446,8 @@ final class ProvisioningRepository
             'renewal_amount' => $this->amountOrNull($service['recurringamount'] ?? $service['amount'] ?? null),
             'provisioned_at' => $provisioningStatus === 'active' ? date('Y-m-d H:i:s') : null,
         ]);
+
+        $this->updateHostingConnectionDetails(null, $serviceId, $serviceUsername, $serviceIp);
     }
 
     public function upsertWebsiteProjectForAccount(array $account, array $service): void
@@ -807,6 +826,48 @@ final class ProvisioningRepository
         return $item ?: null;
     }
 
+    public function itemWithOrderByWhmcsServiceId(int $serviceId): ?array
+    {
+        if ($serviceId <= 0) {
+            return null;
+        }
+
+        $stmt = $this->db->prepare(
+            'SELECT id
+             FROM customer_provisioning_items
+             WHERE item_type = "hosting" AND whmcs_service_id = :service_id
+             ORDER BY id DESC
+             LIMIT 1'
+        );
+        $stmt->execute(['service_id' => $serviceId]);
+        $id = (int) $stmt->fetchColumn();
+        return $id > 0 ? $this->itemWithOrder($id) : null;
+    }
+
+    public function hostingItemsForOrder(int $orderId): array
+    {
+        if ($orderId <= 0) {
+            return [];
+        }
+
+        $stmt = $this->db->prepare(
+            'SELECT id
+             FROM customer_provisioning_items
+             WHERE customer_order_id = :order_id AND item_type = "hosting"
+             ORDER BY id ASC'
+        );
+        $stmt->execute(['order_id' => $orderId]);
+        $items = [];
+        foreach ($stmt->fetchAll() as $row) {
+            $item = $this->itemWithOrder((int) ($row['id'] ?? 0));
+            if ($item) {
+                $items[] = $item;
+            }
+        }
+
+        return $items;
+    }
+
     public function resetItemForRetry(int $id): void
     {
         if ($id <= 0) {
@@ -908,6 +969,50 @@ final class ProvisioningRepository
             '[' . date('c') . '] ' . $event . ' ' . $status . ' ' . $message . ' ' . json_encode($safeContext, JSON_UNESCAPED_SLASHES) . PHP_EOL,
             FILE_APPEND
         );
+    }
+
+    private function updateHostingConnectionDetails(?int $orderId, int $serviceId, string $username, string $serverIp): void
+    {
+        $username = trim($username);
+        $serverIp = trim($serverIp);
+        if ($username === '' && $serverIp === '') {
+            return;
+        }
+
+        $columns = $this->customerProvisioningColumns();
+        $set = ['updated_at = NOW()'];
+        $params = [];
+        if ($username !== '' && isset($columns['cpanel_username'])) {
+            $set[] = 'cpanel_username = :cpanel_username';
+            $params['cpanel_username'] = substr($username, 0, 16);
+        }
+        if ($serverIp !== '' && isset($columns['server_ip'])) {
+            $set[] = 'server_ip = :server_ip';
+            $params['server_ip'] = substr($serverIp, 0, 45);
+        }
+        if (count($set) <= 1) {
+            return;
+        }
+
+        $where = [];
+        if (($orderId ?? 0) > 0) {
+            $where[] = 'customer_order_id = :order_id';
+            $params['order_id'] = $orderId;
+        }
+        if ($serviceId > 0) {
+            $where[] = 'whmcs_service_id = :service_id';
+            $params['service_id'] = $serviceId;
+        }
+        if (!$where) {
+            return;
+        }
+
+        $stmt = $this->db->prepare(
+            'UPDATE customer_provisioning_items
+             SET ' . implode(', ', $set) . '
+             WHERE item_type = "hosting" AND (' . implode(' OR ', $where) . ')'
+        );
+        $stmt->execute($params);
     }
 
     private function ensureWebsiteProject(array $order): void

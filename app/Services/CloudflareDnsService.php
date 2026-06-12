@@ -25,6 +25,44 @@ final class CloudflareDnsService
         return $this->configuredForDomain($domain) ? 'Cloudflare connected' : 'DNS records unavailable';
     }
 
+    public function testConnection(): array
+    {
+        if ($this->token === '') {
+            return ['ok' => false, 'message' => 'Cloudflare API token is not configured.'];
+        }
+
+        $result = $this->api('GET', '/user/tokens/verify');
+        if (!$result['ok']) {
+            return ['ok' => false, 'message' => (string) ($result['message'] ?? 'Cloudflare API token verification failed.')];
+        }
+
+        return [
+            'ok' => true,
+            'message' => $this->accountId !== '' ? 'Cloudflare API token verified.' : 'Cloudflare API token verified, but account ID is missing.',
+        ];
+    }
+
+    public function testAccount(): array
+    {
+        if ($this->token === '') {
+            return ['ok' => false, 'message' => 'Cloudflare API token is not configured.'];
+        }
+        if ($this->accountId === '') {
+            return ['ok' => false, 'message' => 'Cloudflare account ID is not configured.'];
+        }
+
+        $result = $this->api('GET', '/accounts/' . rawurlencode($this->accountId));
+        if (!$result['ok']) {
+            return ['ok' => false, 'message' => (string) ($result['message'] ?? 'Cloudflare account ID could not be verified.')];
+        }
+
+        $account = (array) ($result['data']['result'] ?? []);
+        return [
+            'ok' => true,
+            'message' => 'Cloudflare account ID verified' . ((string) ($account['name'] ?? '') !== '' ? ' for ' . (string) $account['name'] : '') . '.',
+        ];
+    }
+
     public function listRecords(string $domain): array
     {
         $zoneId = $this->zoneIdForDomain($domain);
@@ -112,6 +150,7 @@ final class CloudflareDnsService
         if (empty($zone['ok'])) {
             return ['ok' => false, 'message' => $zone['message'] ?? 'Cloudflare zone lookup failed.'];
         }
+        $zoneAction = !empty($zone['found']) ? 'found' : 'created';
         if (empty($zone['found'])) {
             $zone = $this->createZone($domain);
         }
@@ -172,8 +211,10 @@ final class CloudflareDnsService
         return [
             'ok' => true,
             'zone_id' => $zoneId,
+            'zone_action' => $zoneAction,
             'nameservers' => $zone['nameservers'] ?? [],
             'records' => array_map(static fn (array $result): array => $result['record'] ?? [], $recordResults),
+            'record_results' => $recordResults,
         ];
     }
 
@@ -186,7 +227,7 @@ final class CloudflareDnsService
 
         $result = $this->api('GET', '/zones?name=' . rawurlencode($domain) . '&per_page=1');
         if (!$result['ok']) {
-            return ['ok' => false, 'found' => false, 'message' => 'Cloudflare zone lookup failed.'];
+            return ['ok' => false, 'found' => false, 'message' => (string) ($result['message'] ?? 'Cloudflare zone lookup failed.')];
         }
 
         $zones = $result['data']['result'] ?? [];
@@ -216,13 +257,14 @@ final class CloudflareDnsService
             'type' => 'full',
         ]);
         if (!$result['ok']) {
-            return ['ok' => false, 'found' => false, 'message' => 'Cloudflare zone could not be created.'];
+            return ['ok' => false, 'found' => false, 'message' => (string) ($result['message'] ?? 'Cloudflare zone could not be created.')];
         }
 
         $zone = (array) ($result['data']['result'] ?? []);
         return [
             'ok' => true,
             'found' => true,
+            'created' => true,
             'zone_id' => (string) ($zone['id'] ?? ''),
             'nameservers' => array_values(array_filter(array_map('strval', $zone['name_servers'] ?? []))),
             'zone' => $zone,
@@ -238,7 +280,7 @@ final class CloudflareDnsService
             '/zones/' . rawurlencode($zoneId) . '/dns_records?type=' . rawurlencode($type) . '&name=' . rawurlencode($name) . '&per_page=20'
         );
         if (!$existing['ok']) {
-            return ['ok' => false, 'message' => 'Existing DNS records could not be checked.'];
+            return ['ok' => false, 'message' => (string) ($existing['message'] ?? 'Existing DNS records could not be checked.')];
         }
 
         $records = is_array($existing['data']['result'] ?? null) ? $existing['data']['result'] : [];
@@ -255,20 +297,25 @@ final class CloudflareDnsService
         if ($target === null && $records) {
             $target = (array) $records[0];
         }
+        if ($target !== null && $this->recordMatchesPayload($target, $payload)) {
+            return ['ok' => true, 'action' => 'found', 'record' => $this->normaliseRecord($target)];
+        }
 
         $method = 'POST';
+        $action = 'created';
         $path = '/zones/' . rawurlencode($zoneId) . '/dns_records';
         if (!empty($target['id'])) {
             $method = 'PATCH';
+            $action = 'updated';
             $path .= '/' . rawurlencode((string) $target['id']);
         }
 
         $saved = $this->api($method, $path, $payload);
         if (!$saved['ok']) {
-            return ['ok' => false, 'message' => 'DNS record could not be saved.'];
+            return ['ok' => false, 'message' => (string) ($saved['message'] ?? 'DNS record could not be saved.')];
         }
 
-        return ['ok' => true, 'record' => $this->normaliseRecord((array) ($saved['data']['result'] ?? []))];
+        return ['ok' => true, 'action' => $action, 'record' => $this->normaliseRecord((array) ($saved['data']['result'] ?? []))];
     }
 
     private function upsertTxtRecord(string $zoneId, string $name, string $content, bool $replaceExistingSpf): array
@@ -278,7 +325,7 @@ final class CloudflareDnsService
             '/zones/' . rawurlencode($zoneId) . '/dns_records?type=TXT&name=' . rawurlencode($name) . '&per_page=50'
         );
         if (!$existing['ok']) {
-            return ['ok' => false, 'message' => 'Existing TXT records could not be checked.'];
+            return ['ok' => false, 'message' => (string) ($existing['message'] ?? 'Existing TXT records could not be checked.')];
         }
 
         $target = null;
@@ -292,19 +339,25 @@ final class CloudflareDnsService
         }
 
         $payload = ['type' => 'TXT', 'name' => $name, 'content' => $content, 'ttl' => 1];
+        if ($target !== null && $this->recordMatchesPayload($target, $payload)) {
+            return ['ok' => true, 'action' => 'found', 'record' => $this->normaliseRecord($target)];
+        }
+
         $method = 'POST';
+        $action = 'created';
         $path = '/zones/' . rawurlencode($zoneId) . '/dns_records';
         if (!empty($target['id'])) {
             $method = 'PATCH';
+            $action = 'updated';
             $path .= '/' . rawurlencode((string) $target['id']);
         }
 
         $saved = $this->api($method, $path, $payload);
         if (!$saved['ok']) {
-            return ['ok' => false, 'message' => 'TXT record could not be saved.'];
+            return ['ok' => false, 'message' => (string) ($saved['message'] ?? 'TXT record could not be saved.')];
         }
 
-        return ['ok' => true, 'record' => $this->normaliseRecord((array) ($saved['data']['result'] ?? []))];
+        return ['ok' => true, 'action' => $action, 'record' => $this->normaliseRecord((array) ($saved['data']['result'] ?? []))];
     }
 
     private function applyHttpsSettings(string $zoneId): void
@@ -322,6 +375,29 @@ final class CloudflareDnsService
         if ($alwaysHttps !== null) {
             $this->api('PATCH', '/zones/' . rawurlencode($zoneId) . '/settings/always_use_https', ['value' => $alwaysHttps ? 'on' : 'off']);
         }
+    }
+
+    private function recordMatchesPayload(array $record, array $payload): bool
+    {
+        foreach (['type', 'name', 'content'] as $field) {
+            if (isset($payload[$field]) && (string) ($record[$field] ?? '') !== (string) $payload[$field]) {
+                return false;
+            }
+        }
+
+        if (isset($payload['priority']) && (int) ($record['priority'] ?? 0) !== (int) $payload['priority']) {
+            return false;
+        }
+
+        if (array_key_exists('proxied', $payload) && (bool) ($record['proxied'] ?? false) !== (bool) $payload['proxied']) {
+            return false;
+        }
+
+        if (isset($payload['ttl']) && (int) ($record['ttl'] ?? 1) !== (int) $payload['ttl']) {
+            return false;
+        }
+
+        return true;
     }
 
     private function defaultMxRecords(string $domain): array
@@ -615,14 +691,19 @@ final class CloudflareDnsService
 
         $decoded = json_decode($body, true);
         if ($body === '' || !is_array($decoded) || $status < 200 || $status >= 300 || empty($decoded['success'])) {
+            $errors = is_array($decoded['errors'] ?? null) ? $decoded['errors'] : [];
+            $message = 'Cloudflare DNS request failed.';
+            if (isset($errors[0]) && is_array($errors[0]) && (string) ($errors[0]['message'] ?? '') !== '') {
+                $message = (string) $errors[0]['message'];
+            }
             $this->log('Cloudflare DNS API request failed.', [
                 'method' => $method,
                 'path' => $path,
                 'http_status' => $status,
                 'diagnostic' => $diagnostic,
-                'errors' => is_array($decoded['errors'] ?? null) ? $decoded['errors'] : [],
+                'errors' => $errors,
             ]);
-            return ['ok' => false, 'message' => 'Cloudflare DNS request failed.'];
+            return ['ok' => false, 'message' => $message];
         }
 
         return ['ok' => true, 'data' => $decoded];

@@ -618,6 +618,11 @@ final class WhmcsService
             return ['ok' => false, 'message' => 'Order and client references are required.'];
         }
 
+        $bridge = $this->orderServicesBridgeFallback($orderId, $clientId);
+        if ($bridge['ok']) {
+            return $bridge;
+        }
+
         $products = $this->productsForClient($clientId);
         if (!$products['ok']) {
             return $products;
@@ -634,6 +639,30 @@ final class WhmcsService
         return [
             'ok' => true,
             'products' => $matched,
+        ];
+    }
+
+    private function orderServicesBridgeFallback(int $orderId, int $clientId): array
+    {
+        if (!$this->hasBridge()) {
+            return ['ok' => false, 'message' => 'The WHMCS bridge is not configured.'];
+        }
+
+        $decoded = $this->callApi([
+            'action' => 'PlaneticGetOrderServices',
+            'orderid' => $orderId,
+            'clientid' => $clientId,
+            'responsetype' => 'json',
+        ]);
+
+        if (($decoded['result'] ?? '') !== 'success') {
+            return ['ok' => false, 'message' => $decoded['message'] ?? 'Unable to load order services through the WHMCS bridge.'];
+        }
+
+        return [
+            'ok' => true,
+            'fallback' => 'bridge_order_services',
+            'products' => $this->normaliseApiList($decoded['products']['product'] ?? []),
         ];
     }
 
@@ -1101,7 +1130,7 @@ final class WhmcsService
 
     private function canRetryApiAction(string $action): bool
     {
-        return in_array($action, ['DomainWhois', 'GetTLDPricing', 'GetProducts', 'GetClientsDetails', 'CreateInvoice', 'UpdateInvoice', 'GetInvoice', 'GetInvoices', 'GetOrders', 'PlaneticGetInvoice', 'PlaneticGetOrderInvoice', 'GetClientsProducts', 'GetClientsDomains', 'DomainGetNameservers'], true);
+        return in_array($action, ['DomainWhois', 'GetTLDPricing', 'GetProducts', 'GetClientsDetails', 'CreateInvoice', 'UpdateInvoice', 'GetInvoice', 'GetInvoices', 'GetOrders', 'PlaneticGetInvoice', 'PlaneticGetOrderInvoice', 'PlaneticGetOrderServices', 'GetClientsProducts', 'GetClientsDomains', 'DomainGetNameservers'], true);
     }
 
     private function firstApiInt(array $payload, array $keys): int

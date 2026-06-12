@@ -1,0 +1,376 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+require __DIR__ . '/app/bootstrap.php';
+
+use App\Core\Database;
+use App\Models\ContentRepository;
+use App\Models\PaymentRepository;
+use App\Models\ProvisioningRepository;
+use App\Services\CloudflareDnsService;
+use App\Services\ProvisioningAutomationService;
+use App\Services\WhmAccountService;
+use App\Services\WhmcsService;
+
+$command = (string) ($argv[1] ?? '');
+
+if ($command === '' || in_array($command, ['help', '-h', '--help'], true)) {
+    line('Planetic Solutions CLI');
+    line('');
+    line('Available commands:');
+    line('  php artisan planetic:provision-diagnose');
+    line('  php artisan planetic:provision-order {localOrderId}');
+    line('  php artisan planetic:provision-service {localProvisioningItemId|whmcsServiceId}');
+    line('  php artisan config:clear    (compatibility no-op)');
+    line('  php artisan cache:clear     (compatibility no-op)');
+    line('  php artisan route:clear     (compatibility no-op)');
+    line('  php artisan view:clear      (compatibility no-op)');
+    line('  php artisan queue:restart   (compatibility no-op)');
+    exit(0);
+}
+
+try {
+    match ($command) {
+        'planetic:provision-diagnose' => provisionDiagnose(),
+        'planetic:provision-order' => provisionOrder((int) ($argv[2] ?? 0)),
+        'planetic:provision-service' => provisionService((int) ($argv[2] ?? 0)),
+        'config:clear', 'cache:clear', 'route:clear', 'view:clear', 'queue:restart' => compatibilityNoop($command),
+        default => unknownCommand($command),
+    };
+} catch (Throwable $exception) {
+    line('ERROR: ' . $exception->getMessage());
+    exit(1);
+}
+
+function provisionDiagnose(): void
+{
+    $content = new ContentRepository();
+    $settings = $content->settings();
+    $whmcs = new WhmcsService($settings);
+    $whm = new WhmAccountService($settings);
+    $cloudflare = new CloudflareDnsService($settings);
+    $provisioning = new ProvisioningRepository();
+
+    line('Planetic Provisioning Diagnostics');
+    line('Generated: ' . date('c'));
+    line('');
+
+    section('Application');
+    status('App bootstrap', true, 'Loaded app/bootstrap.php');
+    status('Runtime type', true, 'Custom PHP app; no Laravel kernel detected.');
+    status('APP_URL', env('APP_URL', '') !== '', present(env('APP_URL', '')));
+    status('Stripe webhook route', routeContains('/stripe/webhook'), routeContains('/stripe/webhook') ? 'POST /stripe/webhook found in index.php' : 'Route not found in index.php');
+    status('Queue connection', true, 'N/A - this app does not use Laravel queues or queue workers.');
+    status('Failed jobs table', true, failedJobsSummary());
+    status('Laravel config cache', true, 'N/A - this app reads .env through App\\Core\\Env on each request.');
+
+    section('Required Configuration');
+    $required = [
+        'STRIPE_SECRET_KEY' => env('STRIPE_SECRET_KEY', '') !== '',
+        'STRIPE_PUBLISHABLE_KEY' => env('STRIPE_PUBLISHABLE_KEY', '') !== '',
+        'STRIPE_WEBHOOK_SECRET' => env('STRIPE_WEBHOOK_SECRET', '') !== '',
+        'WHMCS_PAYMENT_GATEWAY_NAME' => envOrSetting($settings, 'whmcs_payment_gateway_name', 'WHMCS_PAYMENT_GATEWAY_NAME') !== '',
+        'WHMCS_API_URL or WHMCS_LOCAL_API_BRIDGE_URL' => env('WHMCS_API_URL', '') !== '' || env('WHMCS_LOCAL_API_BRIDGE_URL', '') !== '' || ($settings['whmcs_api_url'] ?? '') !== '',
+        'WHMCS API credentials or bridge token' => whmcsAuthConfigured($settings),
+        'WHM_HOSTNAME/WHM_USERNAME/WHM_API_TOKEN' => envOrSetting($settings, 'whm_hostname', 'WHM_HOSTNAME', 'WHM_HOST') !== ''
+            && envOrSetting($settings, 'whm_username', 'WHM_USERNAME', 'WHM_RESELLER_USERNAME') !== ''
+            && envOrSetting($settings, 'whm_api_token', 'WHM_API_TOKEN') !== '',
+        'DEFAULT_HOSTING_SERVER_IP' => envOrSetting($settings, 'default_hosting_server_ip', 'DEFAULT_HOSTING_SERVER_IP', 'WHM_SERVER_IP', 'HOSTING_SERVER_IP') !== '',
+        'CLOUDFLARE_API_TOKEN' => envOrSetting($settings, 'cloudflare_api_token', 'CLOUDFLARE_API_TOKEN') !== '',
+        'CLOUDFLARE_ACCOUNT_ID' => envOrSetting($settings, 'cloudflare_account_id', 'CLOUDFLARE_ACCOUNT_ID') !== '',
+        'CPANEL_CREDENTIAL_KEY or APP_KEY' => env('CPANEL_CREDENTIAL_KEY', env('APP_KEY', '')) !== '',
+    ];
+    foreach ($required as $label => $ok) {
+        status($label, (bool) $ok, $ok ? 'present' : 'missing');
+    }
+
+    section('Connectivity');
+    $whmcsResult = safeCall(static fn (): array => $whmcs->products());
+    status('WHMCS API', !empty($whmcsResult['ok']), (string) ($whmcsResult['message'] ?? (!empty($whmcsResult['ok']) ? 'GetProducts succeeded.' : 'GetProducts failed.')));
+
+    $whmResult = safeCall(static fn (): array => $whm->testConnection());
+    status('WHM/cPanel API listpkgs', !empty($whmResult['ok']), (string) ($whmResult['message'] ?? 'WHM API listpkgs check failed.'));
+
+    $cloudflareResult = safeCall(static fn (): array => $cloudflare->testConnection());
+    status('Cloudflare API', !empty($cloudflareResult['ok']), (string) ($cloudflareResult['message'] ?? 'Cloudflare API check failed.'));
+
+    $cloudflareAccountResult = safeCall(static fn (): array => $cloudflare->testAccount());
+    status('Cloudflare account ID', !empty($cloudflareAccountResult['ok']), (string) ($cloudflareAccountResult['message'] ?? 'Cloudflare account check failed.'));
+
+    section('Hosting Package Mapping');
+    foreach (expectedPackages($settings) as $label => $package) {
+        $exists = $whm->configured() ? $whm->packageExists($package) : null;
+        $message = $exists === null ? 'mapped to ' . $package . ' (WHM not configured for existence check)' : ($exists ? $package . ' exists in WHM' : $package . ' was not found in WHM');
+        status($label, $package !== '' && $exists !== false, $message);
+    }
+
+    section('Database State');
+    $pendingCount = scalarQuery('SELECT COUNT(*) FROM customer_provisioning_items WHERE item_type = "hosting" AND provisioning_status != "active"');
+    status('Pending/failed hosting items', true, (string) $pendingCount);
+
+    $pendingRows = rowsQuery(
+        'SELECT id, customer_order_id, whmcs_service_id, domain_name, whm_package, payment_status, provisioning_status,
+                hosting_setup_status, cpanel_username, server_ip, cloudflare_status, setup_issue_internal, cloudflare_last_error, updated_at
+         FROM customer_provisioning_items
+         WHERE item_type = "hosting" AND provisioning_status != "active"
+         ORDER BY updated_at DESC, id DESC
+         LIMIT 15'
+    );
+    line('');
+    line('Pending hosting services:');
+    if (!$pendingRows) {
+        line('  none found');
+    }
+    foreach ($pendingRows as $row) {
+        $parts = [
+            '#' . (int) ($row['id'] ?? 0),
+            'order=' . (int) ($row['customer_order_id'] ?? 0),
+            'service=' . (int) ($row['whmcs_service_id'] ?? 0),
+            'domain=' . (string) ($row['domain_name'] ?? ''),
+            'package=' . (string) ($row['whm_package'] ?? ''),
+            'payment=' . (string) ($row['payment_status'] ?? ''),
+            'status=' . (string) ($row['provisioning_status'] ?? ''),
+            'setup=' . (string) ($row['hosting_setup_status'] ?? ''),
+            'cpanel=' . (((string) ($row['cpanel_username'] ?? '')) !== '' ? 'present' : 'missing'),
+            'ip=' . (((string) ($row['server_ip'] ?? '')) !== '' ? 'present' : 'missing'),
+            'dns=' . ((string) ($row['cloudflare_status'] ?? '') ?: 'not_started'),
+        ];
+        $error = trim((string) ($row['setup_issue_internal'] ?? $row['cloudflare_last_error'] ?? ''));
+        line('  - ' . implode(' | ', $parts) . ($error !== '' ? ' | error=' . truncate($error, 120) : ''));
+    }
+
+    $lastFailures = rowsQuery(
+        'SELECT event, status, message, created_at
+         FROM provisioning_logs
+         WHERE status IN ("failed", "error")
+         ORDER BY id DESC
+         LIMIT 10'
+    );
+    if (!$lastFailures) {
+        $lastFailures = rowsQuery(
+            'SELECT "item_status" AS event, provisioning_status AS status, setup_issue_internal AS message, updated_at AS created_at
+             FROM customer_provisioning_items
+             WHERE item_type = "hosting" AND provisioning_status = "action_required"
+             ORDER BY updated_at DESC, id DESC
+             LIMIT 10'
+        );
+    }
+
+    line('');
+    line('Last provisioning failures:');
+    if (!$lastFailures) {
+        line('  none found');
+    }
+    foreach ($lastFailures as $row) {
+        line('  - [' . (string) ($row['created_at'] ?? '') . '] ' . (string) ($row['event'] ?? '') . ' / ' . (string) ($row['status'] ?? '') . ': ' . truncate((string) ($row['message'] ?? ''), 180));
+    }
+}
+
+function provisionOrder(int $orderId): void
+{
+    if ($orderId <= 0) {
+        throw new RuntimeException('Usage: php artisan planetic:provision-order {localOrderId}');
+    }
+
+    $content = new ContentRepository();
+    $settings = $content->settings();
+    $payments = new PaymentRepository();
+    $provisioning = new ProvisioningRepository();
+    $order = $payments->find($orderId);
+    if (!$order) {
+        throw new RuntimeException('Local order was not found.');
+    }
+
+    $whmPackage = (string) ($order['whm_package'] ?? '');
+    if ($whmPackage === '') {
+        $whmPackage = packageForOrder($order, $settings);
+    }
+    $provisioning->ensureOrderRecords($order, $whmPackage);
+    $items = $provisioning->hostingItemsForOrder($orderId);
+    if (!$items) {
+        throw new RuntimeException('No hosting provisioning item exists for this order.');
+    }
+
+    $automation = new ProvisioningAutomationService(new WhmcsService($settings), $provisioning, $settings);
+    foreach ($items as $item) {
+        line('Retrying hosting item #' . (int) $item['id'] . ' for ' . (string) ($item['domain_name'] ?? 'domain'));
+        $provisioning->resetItemForRetry((int) $item['id']);
+        $result = $automation->retryHostingProvisioning($item, 'cli:provision-order');
+        status('Result', !empty($result['ok']), (string) ($result['message'] ?? (!empty($result['ok']) ? 'Provisioning completed or is active.' : 'Provisioning failed.')));
+    }
+}
+
+function provisionService(int $serviceId): void
+{
+    if ($serviceId <= 0) {
+        throw new RuntimeException('Usage: php artisan planetic:provision-service {localProvisioningItemId|whmcsServiceId}');
+    }
+
+    $content = new ContentRepository();
+    $settings = $content->settings();
+    $provisioning = new ProvisioningRepository();
+    $item = $provisioning->itemWithOrder($serviceId) ?? $provisioning->itemWithOrderByWhmcsServiceId($serviceId);
+    if (!$item) {
+        throw new RuntimeException('Hosting provisioning item was not found by local item ID or WHMCS service ID.');
+    }
+
+    $provisioning->resetItemForRetry((int) $item['id']);
+    $result = (new ProvisioningAutomationService(new WhmcsService($settings), $provisioning, $settings))
+        ->retryHostingProvisioning($item, 'cli:provision-service');
+
+    status('Result', !empty($result['ok']), (string) ($result['message'] ?? (!empty($result['ok']) ? 'Provisioning completed or is active.' : 'Provisioning failed.')));
+}
+
+function unknownCommand(string $command): void
+{
+    line('Unknown command: ' . $command);
+    line('Run php artisan --help');
+    exit(1);
+}
+
+function compatibilityNoop(string $command): void
+{
+    line($command . ': OK');
+    line('This is a custom PHP app, not Laravel. No Laravel cache or queue worker exists to clear/restart.');
+}
+
+function status(string $label, bool $ok, string $message = ''): void
+{
+    line(($ok ? '[OK]   ' : '[FAIL] ') . $label . ($message !== '' ? ' - ' . $message : ''));
+}
+
+function section(string $title): void
+{
+    line('');
+    line($title);
+    line(str_repeat('-', strlen($title)));
+}
+
+function line(string $message): void
+{
+    fwrite(STDOUT, $message . PHP_EOL);
+}
+
+function routeContains(string $needle): bool
+{
+    $path = BASE_PATH . '/index.php';
+    return is_file($path) && str_contains((string) file_get_contents($path), $needle);
+}
+
+function whmcsAuthConfigured(array $settings): bool
+{
+    $bridge = envOrSetting($settings, 'whmcs_local_api_bridge_url', 'WHMCS_LOCAL_API_BRIDGE_URL') !== ''
+        && envOrSetting($settings, 'whmcs_local_api_bridge_token', 'WHMCS_LOCAL_API_BRIDGE_TOKEN') !== '';
+    $direct = envOrSetting($settings, 'whmcs_api_identifier', 'WHMCS_API_IDENTIFIER') !== ''
+        && envOrSetting($settings, 'whmcs_api_secret', 'WHMCS_API_SECRET') !== '';
+
+    return $bridge || $direct;
+}
+
+function envOrSetting(array $settings, string $settingKey, string ...$envKeys): string
+{
+    $value = trim((string) ($settings[$settingKey] ?? ''));
+    if ($value !== '') {
+        return $value;
+    }
+    foreach ($envKeys as $key) {
+        $value = trim((string) env($key, ''));
+        if ($value !== '') {
+            return $value;
+        }
+    }
+
+    return '';
+}
+
+function present(string $value): string
+{
+    return trim($value) !== '' ? 'present' : 'missing';
+}
+
+function safeCall(callable $callback): array
+{
+    try {
+        return $callback();
+    } catch (Throwable $exception) {
+        return ['ok' => false, 'message' => $exception->getMessage()];
+    }
+}
+
+function scalarQuery(string $sql): string
+{
+    try {
+        return (string) Database::connection()->query($sql)->fetchColumn();
+    } catch (Throwable $exception) {
+        return 'unavailable: ' . $exception->getMessage();
+    }
+}
+
+function rowsQuery(string $sql): array
+{
+    try {
+        return Database::connection()->query($sql)->fetchAll();
+    } catch (Throwable) {
+        return [];
+    }
+}
+
+function failedJobsSummary(): string
+{
+    try {
+        $stmt = Database::connection()->query('SHOW TABLES LIKE "failed_jobs"');
+        if (!$stmt->fetchColumn()) {
+            return 'N/A - no failed_jobs table in this custom PHP app.';
+        }
+
+        return scalarQuery('SELECT COUNT(*) FROM failed_jobs') . ' failed job(s)';
+    } catch (Throwable $exception) {
+        return 'unavailable: ' . $exception->getMessage();
+    }
+}
+
+function expectedPackages(array $settings): array
+{
+    $config = is_file(APP_PATH . '/config/whmcs.php') ? require APP_PATH . '/config/whmcs.php' : [];
+    $products = (array) ($config['hosting_products'] ?? []);
+
+    return [
+        'Starter' => (string) ($products['starter-hosting']['whm_package'] ?? env('WHMCS_STARTER_WHM_PACKAGE', 'planetic_starter')),
+        'Business' => (string) ($products['business-hosting']['whm_package'] ?? env('WHMCS_BUSINESS_WHM_PACKAGE', 'planetic_business')),
+        'Pro' => (string) ($products['pro-hosting']['whm_package'] ?? env('WHMCS_PRO_WHM_PACKAGE', 'planetic_pro')),
+        'Agency/Ecommerce' => (string) ($products['agency-hosting']['whm_package'] ?? env('WHMCS_AGENCY_WHM_PACKAGE', 'planetic_agency')),
+    ];
+}
+
+function packageForOrder(array $order, array $settings): string
+{
+    $slug = (string) ($order['hosting_plan_slug'] ?? '');
+    $config = is_file(APP_PATH . '/config/whmcs.php') ? require APP_PATH . '/config/whmcs.php' : [];
+    $products = (array) ($config['hosting_products'] ?? []);
+    if ($slug !== '' && !empty($products[$slug]['whm_package'])) {
+        return (string) $products[$slug]['whm_package'];
+    }
+
+    $text = strtolower($slug . ' ' . (string) ($order['package_label'] ?? ''));
+    if (str_contains($text, 'starter')) {
+        return 'planetic_starter';
+    }
+    if (str_contains($text, 'business')) {
+        return 'planetic_business';
+    }
+    if (str_contains($text, 'agency') || str_contains($text, 'ecommerce') || str_contains($text, 'commerce')) {
+        return 'planetic_agency';
+    }
+    if (str_contains($text, 'pro') || str_contains($text, 'wordpress')) {
+        return 'planetic_pro';
+    }
+
+    return (string) ($settings['default_whm_package'] ?? '');
+}
+
+function truncate(string $value, int $limit): string
+{
+    return strlen($value) <= $limit ? $value : substr($value, 0, $limit - 3) . '...';
+}
